@@ -1,0 +1,25 @@
+services:
+  zwave-js-ui:
+    container_name: zwave-js-ui
+    image: zwavejs/zwave-js-ui:latest
+    restart: always
+    tty: true
+    stop_signal: SIGINT
+    environment:
+      - SESSION_SECRET=${ZWAVE_SESSION_SECRET}
+      - ZWAVEJS_EXTERNAL_CONFIG=/usr/src/app/store/.config-db
+      - TZ=${TZ}
+    networks:
+      - zwave
+    devices:
+      - '${ZWAVE_DEVICE}'
+    volumes:
+      - zwave-config:/usr/src/app/store
+    ports:
+      - '${ZWAVE_WEB_PORT}:8091'
+      - '${ZWAVE_WS_PORT}:3000'
+networks:
+  zwave:
+volumes:
+  zwave-config:
+    name: zwave-config
