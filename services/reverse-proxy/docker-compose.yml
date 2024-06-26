@@ -1,0 +1,17 @@
+services:
+  reverse-proxy:
+    container_name: reverse-proxy
+    image: ${DOCKER_REGISTRY}/reverse-proxy:latest
+    restart: always
+    tty: true
+    environment:
+      - REVERSE_PROXY_CONFIG_FILE=/data/reverse-proxy.json
+      - ASPNETCORE_HTTP_PORTS=${REVERSE_PROXY_HTTP_PORT}
+      #- ASPNETCORE_HTTPS_PORTS=${REVERSE_PROXY_HTTPS_PORT}
+    volumes:
+      - type: bind
+        source: ${REVERSE_PROXY_CONFIG}
+        target: /data/reverse-proxy.json
+    ports:
+      - '${REVERSE_PROXY_HTTP_PORT}:${REVERSE_PROXY_HTTP_PORT}'
+      #- '${REVERSE_PROXY_HTTPS_PORT}:${REVERSE_PROXY_HTTPS_PORT}'
