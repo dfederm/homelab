@@ -1,8 +1,8 @@
 <Project>
   <Target Name="OutputContainerDigest" AfterTargets="PublishContainer" Condition=" '$(GITHUB_OUTPUT)' != '' ">
     <ItemGroup>
-      <GithubOutputLines Include="container-image=$(ContainerRegistry)/$(ContainerRepository)">
-      <GithubOutputLines Include="container-digest=$(GeneratedContainerDigest)">
+      <GithubOutputLines Include="container-image=$(ContainerRegistry)/$(ContainerRepository)" />
+      <GithubOutputLines Include="container-digest=$(GeneratedContainerDigest)" />
     </ItemGroup>
     <WriteLinesToFile File="$(GITHUB_OUTPUT)" Lines="@(GithubOutputLines)" />
   </Target>
