@@ -5,7 +5,7 @@ on:
     branches:
       - main
     paths:
-      - '.github\workflows\publish-images.yml'
+      - '.github/workflows/publish-images.yml'
       - 'src/**'
 
 env:
