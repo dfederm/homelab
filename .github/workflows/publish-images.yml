@@ -42,7 +42,7 @@ jobs:
           dotnet publish \
             src/${{ matrix.project }} \
             --configuration Release \
-            -p:PublishProfile=DefaultContainer \\
+            -p:PublishProfile=DefaultContainer \
             -p:ContainerRegistry=${{ env.container_registry }} \
             -bl:logs/${{ matrix.project }}.binlog
 
