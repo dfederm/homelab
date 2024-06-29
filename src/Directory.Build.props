@@ -2,7 +2,7 @@
   <PropertyGroup Condition=" '$(CI)' == 'true' ">
     <ContainerImageTags>$([System.DateTime]::UtcNow.ToString('yyyyMMddhhmmss'))</ContainerImageTags>
     <ContainerImageTags Condition=" '$(GITHUB_HEAD_REF)' == '' ">$(ContainerImageTags);latest</ContainerImageTags>
-    <ContainerRepository>$(GITHUB_REPOSITORY_OWNER)/$(MSBuildProjectName)</ContainerRepository>
+    <ContainerRepository>$(GITHUB_REPOSITORY)/$(MSBuildProjectName)</ContainerRepository>
     <ContainerVendor>$(GITHUB_REPOSITORY_OWNER)</ContainerVendor>
     <ContainerVersion>$(GITHUB_SHA)</ContainerVersion>
   </PropertyGroup>
