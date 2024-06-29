@@ -1,8 +1,8 @@
 <Project>
   <PropertyGroup Condition=" '$(CI)' == 'true' ">
-    <ContainerImageTags>github-$(GITHUB_RUN_NUMBER)</ContainerImageTags>
+    <ContainerImageTags>$([System.DateTime]::UtcNow.ToString('yyyyMMddhhmmss'))</ContainerImageTags>
     <ContainerImageTags Condition=" '$(GITHUB_HEAD_REF)' == '' ">$(ContainerImageTags);latest</ContainerImageTags>
-    <ContainerRepository>$(GITHUB_REPOSITORY_OWNER)/$(AssemblyName)</ContainerRepository>
+    <ContainerRepository>$(GITHUB_REPOSITORY_OWNER)/$(MSBuildProjectName)</ContainerRepository>
     <ContainerVendor>$(GITHUB_REPOSITORY_OWNER)</ContainerVendor>
     <ContainerVersion>$(GITHUB_SHA)</ContainerVersion>
   </PropertyGroup>
