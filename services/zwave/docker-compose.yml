@@ -23,4 +23,3 @@ networks:
 volumes:
   zwave-config:
     name: zwave-config
-    external: true
