@@ -7,6 +7,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Yarp.ReverseProxy" Version="2.2.0-preview.1.24266.1" />
+    <PackageReference Include="Yarp.ReverseProxy" />
   </ItemGroup>
 </Project>

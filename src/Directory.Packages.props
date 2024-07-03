@@ -1,0 +1,5 @@
+<Project>
+  <ItemGroup>
+    <PackageVersion Include="Yarp.ReverseProxy" Version="2.2.0-preview.1.24266.1" />
+  </ItemGroup>
+</Project>

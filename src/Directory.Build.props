@@ -1,4 +1,7 @@
 <Project>
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
   <PropertyGroup Condition=" '$(CI)' == 'true' ">
     <ContainerImageTags>$([System.DateTime]::UtcNow.ToString('yyyyMMddhhmmss'))</ContainerImageTags>
     <ContainerImageTags Condition=" '$(GITHUB_HEAD_REF)' == '' ">$(ContainerImageTags);latest</ContainerImageTags>
