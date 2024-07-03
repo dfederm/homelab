@@ -5,13 +5,13 @@ services:
     restart: always
     tty: true
     environment:
-      - REVERSE_PROXY_CONFIG_FILE=/data/reverse-proxy.json
       - ASPNETCORE_HTTP_PORTS=${REVERSE_PROXY_HTTP_PORT}
-      #- ASPNETCORE_HTTPS_PORTS=${REVERSE_PROXY_HTTPS_PORT}
+      - ASPNETCORE_HTTPS_PORTS=${REVERSE_PROXY_HTTPS_PORT}
+      - REVERSE_PROXY_CONFIG_FILE=/etc/opt/reverse-proxy/reverse-proxy.json
+      - REVERSE_PROXY_CERTIFICATE_DIRECTORY=/certs
     volumes:
-      - type: bind
-        source: ${REVERSE_PROXY_CONFIG}
-        target: /data/reverse-proxy.json
+      - ${DOCKER_APPDATA_ROOT}/reverse-proxy:/etc/opt/reverse-proxy
+      - ${DOCKER_APPDATA_ROOT}/shared/certs:/certs
     ports:
       - '${REVERSE_PROXY_HTTP_PORT}:${REVERSE_PROXY_HTTP_PORT}'
-      #- '${REVERSE_PROXY_HTTPS_PORT}:${REVERSE_PROXY_HTTPS_PORT}'
+      - '${REVERSE_PROXY_HTTPS_PORT}:${REVERSE_PROXY_HTTPS_PORT}'
