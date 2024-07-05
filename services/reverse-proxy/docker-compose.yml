@@ -12,7 +12,6 @@ services:
     volumes:
       - ${DOCKER_APPDATA_ROOT}/reverse-proxy:/etc/opt/reverse-proxy
       - ${DOCKER_APPDATA_ROOT}/shared/certs/letsencrypt:/certs
-      - ${DOCKER_APPDATA_ROOT}/shared/certs/x509stores:/.dotnet/corefx/cryptography/x509stores/my
     ports:
       - '${REVERSE_PROXY_HTTP_PORT}:${REVERSE_PROXY_HTTP_PORT}'
       - '${REVERSE_PROXY_HTTPS_PORT}:${REVERSE_PROXY_HTTPS_PORT}'

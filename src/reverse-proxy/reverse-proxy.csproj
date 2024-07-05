@@ -6,9 +6,11 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <!--
       The SDK defaults to using the rootless "app" user, but this service needs write access to
-      store certs, etc.
+      store certs, etc. I tried using the user 1000, but that depends on the host having a user
+      with the same id, having the correct permissions, and still hit issues with the user's
+      cert store. So just use root, despite being a potential security issue.
     -->
-    <ContainerUser>1000:1000</ContainerUser>
+    <ContainerUser>root</ContainerUser>
   </PropertyGroup>
 
   <ItemGroup>
