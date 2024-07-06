@@ -6,5 +6,7 @@ services:
     ports:
       - ${PORTAINER_WEB_PORT}:9000
     volumes:
-      - ${DOCKER_APPDATA_ROOT}/portainer/data:/data
+      - data:/data
       - /var/run/docker.sock:/var/run/docker.sock
+volumes:
+  data:
