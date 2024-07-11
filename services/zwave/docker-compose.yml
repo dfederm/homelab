@@ -12,7 +12,7 @@ services:
     networks:
       - zwave
     devices:
-      - '${ZWAVE_DEVICE}'
+      - '${ZWAVE_DEVICE}:/dev/zwave'
     volumes:
       - zwave-config:/usr/src/app/store
     ports:
