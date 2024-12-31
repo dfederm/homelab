@@ -1,0 +1,17 @@
+services:
+  rclone-david:
+    container_name: rclone-david
+    image: rclone/rclone:latest
+    restart: unless-stopped
+    tty: true
+    environment:
+      - TZ=${TZ}
+    volumes:
+      - ${DOCKER_APPDATA_ROOT}/backup/rclone:/config/rclone:rw
+      - ${DOCKER_APPDATA_ROOT}/backup/backup.sh:/backup.sh
+      - ${DOCKER_APPDATA_ROOT}/backup/start.sh:/start.sh
+      - ${DOCKER_APPDATA_ROOT}/backup/cronjobs:/etc/crontabs/root:ro
+      - ${BACKUP_DATA_ROOT}/David:/data:ro
+    # Reset the entrypoint, rclone set it to `rclone`.
+    entrypoint: ''
+    command: '/start.sh'
