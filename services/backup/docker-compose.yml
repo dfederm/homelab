@@ -1,40 +1,24 @@
 services:
   rclone-david:
     container_name: rclone-david
-    image: rclone/rclone:latest
     restart: unless-stopped
     tty: true
     environment:
       - TZ=${TZ}
-      - RCLONE_SRC=/data
       - RCLONE_DEST=onedrivedavid:/nas-backup
-      - RCLONE_FLAGS=-v --create-empty-src-dirs --metadata
     volumes:
       - ${DOCKER_APPDATA_ROOT}/backup/rclone:/config/rclone:rw
-      - ${DOCKER_APPDATA_ROOT}/backup/backup.sh:/backup.sh
-      - ${DOCKER_APPDATA_ROOT}/backup/start.sh:/start.sh
-      - ${DOCKER_APPDATA_ROOT}/backup/cronjobs:/etc/crontabs/root:ro
       - ${BACKUP_DATA_ROOT}/David:/data:ro
-    # Reset the entrypoint, rclone set it to `rclone`.
-    entrypoint: ''
-    command: '/start.sh'
+    build: .
 
   rclone-maria:
     container_name: rclone-maria
-    image: rclone/rclone:latest
     restart: unless-stopped
     tty: true
     environment:
       - TZ=${TZ}
-      - RCLONE_SRC=/data
       - RCLONE_DEST=onedrivemaria:/nas-backup
-      - RCLONE_FLAGS=-v --create-empty-src-dirs --metadata
     volumes:
       - ${DOCKER_APPDATA_ROOT}/backup/rclone:/config/rclone:rw
-      - ${DOCKER_APPDATA_ROOT}/backup/backup.sh:/backup.sh
-      - ${DOCKER_APPDATA_ROOT}/backup/start.sh:/start.sh
-      - ${DOCKER_APPDATA_ROOT}/backup/cronjobs:/etc/crontabs/root:ro
       - ${BACKUP_DATA_ROOT}/Maria:/data:ro
-    # Reset the entrypoint, rclone set it to `rclone`.
-    entrypoint: ''
-    command: '/start.sh'
+    build: .
