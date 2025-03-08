@@ -22,3 +22,27 @@ services:
       - ${DOCKER_APPDATA_ROOT}/backup/rclone:/config/rclone:rw
       - ${BACKUP_DATA_ROOT}/Maria:/data:ro
     build: .
+
+  rclone-max:
+    container_name: rclone-max
+    restart: unless-stopped
+    tty: true
+    environment:
+      - TZ=${TZ}
+      - RCLONE_DEST=onedrivemax:/nas-backup
+    volumes:
+      - ${DOCKER_APPDATA_ROOT}/backup/rclone:/config/rclone:rw
+      - ${BACKUP_DATA_ROOT}/Max:/data:ro
+    build: .
+
+  rclone-jack:
+    container_name: rclone-jack
+    restart: unless-stopped
+    tty: true
+    environment:
+      - TZ=${TZ}
+      - RCLONE_DEST=onedrivejack:/nas-backup
+    volumes:
+      - ${DOCKER_APPDATA_ROOT}/backup/rclone:/config/rclone:rw
+      - ${BACKUP_DATA_ROOT}/Jack:/data:ro
+    build: .
