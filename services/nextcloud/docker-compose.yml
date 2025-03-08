@@ -1,0 +1,92 @@
+services:
+  app:
+    container_name: nextcloud
+    image: nextcloud
+    restart: unless-stopped
+    depends_on:
+      - mariadb
+      - redis
+    networks:
+      - nextcloud
+    ports:
+      - ${NEXTCLOUD_HTTP_PORT}:80
+    volumes:
+      - app-www:/var/www/html
+      - app-data:/data
+    extra_hosts:
+      - "${NEXTCLOUD_APP_FQDN}:${NEXTCLOUD_IP}"
+      - "${NEXTCLOUD_COLLABORA_FQDN}:${NEXTCLOUD_IP}"
+    environment:
+      - NEXTCLOUD_TRUSTED_DOMAINS='${NEXTCLOUD_APP_FQDN}'
+      - NEXTCLOUD_DATA_DIR=/data
+      - MYSQL_DATABASE=${NEXTCLOUD_DB_NAME}
+      - MYSQL_USER=${NEXTCLOUD_DB_USERNAME}
+      - MYSQL_PASSWORD=${NEXTCLOUD_DB_PASSWORD}
+      - MYSQL_HOST=nextcloud-mariadb
+      - REDIS_HOST=nextcloud-redis
+
+  mariadb:
+    container_name: nextcloud-mariadb
+    image: mariadb
+    restart: unless-stopped
+    networks:
+      - nextcloud
+    command: --transaction-isolation=READ-COMMITTED --log-bin=binlog --binlog-format=ROW
+    volumes:
+      - mariadb-data:/var/lib/mysql
+    environment:
+      - MYSQL_ROOT_PASSWORD=${NEXTCLOUD_DB_ROOT_PASSWORD}
+      - MYSQL_DATABASE=${NEXTCLOUD_DB_NAME}
+      - MYSQL_USER=${NEXTCLOUD_DB_USERNAME}
+      - MYSQL_PASSWORD=${NEXTCLOUD_DB_PASSWORD}
+
+  redis:
+    container_name: nextcloud-redis
+    image: redis
+    networks:
+      - nextcloud
+    restart: unless-stopped
+
+  collabora:
+      container_name: nextcloud-collabora
+      image: collabora/code
+      restart: unless-stopped
+      networks:
+        - nextcloud
+      ports:
+        - "9980:9980"
+      extra_hosts:
+        - "${NEXTCLOUD_APP_FQDN}:${NEXTCLOUD_IP}"
+        - "${NEXTCLOUD_COLLABORA_FQDN}:${NEXTCLOUD_IP}"
+      environment:
+        - 'domain=${NEXTCLOUD_APP_FQDN}'
+        - 'dictionaries=en'
+      cap_add:
+        - MKNOD
+      tty: true
+
+networks:
+  nextcloud:
+
+volumes:
+  # Having issues using SMB for this one. Possibly related to www-root user?
+  app-www:
+    # driver: local
+    # driver_opts:
+    #   type: cifs
+    #   o: addr=${SMB_IP},username=${SMB_USERNAME},password=${SMB_PASSWORD},rw,noperm,iocharset=utf8,vers=3.11
+    #   device: "//${SMB_IP}/${SMB_APPDATA_ROOT}/nextcloud/www"
+  app-data:
+    driver: local
+    driver_opts:
+      type: cifs
+      # Note: Nextcloud requires the data dir not be "readable by others", so the file_mode and dir_mode fake this.
+      o: addr=${SMB_IP},username=${SMB_USERNAME},password=${SMB_PASSWORD},rw,noperm,iocharset=utf8,vers=3.11,file_mode=0770,dir_mode=0770
+      device: "//${SMB_IP}/${NEXTCLOUD_DATA_PATH}"
+  # Having issues using SMB for this one. Unsure why.
+  mariadb-data:
+    # driver: local
+    # driver_opts:
+    #   type: cifs
+    #   o: addr=${SMB_IP},username=${SMB_USERNAME},password=${SMB_PASSWORD},rw,noperm,iocharset=utf8,vers=3.11
+    #   device: "//${SMB_IP}/${SMB_APPDATA_ROOT}/nextcloud/mariadb"
