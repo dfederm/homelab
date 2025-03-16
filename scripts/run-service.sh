@@ -35,6 +35,9 @@ docker compose up --force-recreate --build -d
 echo "Pruning unused images"
 docker image prune -f
 
+echo "Pruning unused volumes"
+docker volume prune -f
+
 popd
 
 exit 0
