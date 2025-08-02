@@ -1,0 +1,19 @@
+services:
+  jellyfin:
+    container_name: jellyfin
+    # Pinned to 10.9.8 until Xbox app is fixed.
+    # See: https://github.com/jellyfin/jellyfin-xbox/issues/48
+    image: jellyfin/jellyfin:10.9.8
+    restart: unless-stopped
+    environment:
+      - TZ=${TZ}
+    volumes:
+      - ${DOCKER_APPDATA_ROOT}/jellyfin/config:/config
+      - ${DOCKER_APPDATA_ROOT}/jellyfin/cache:/cache
+      - ${JELLYFIN_MEDIA_LOCATION}/Movies:/movies
+      - ${JELLYFIN_MEDIA_LOCATION}/TV:/shows
+      - ${JELLYFIN_MEDIA_LOCATION}/Music:/music
+    ports:
+      - '${JELLYFIN_HTTP_PORT}:8096'
+      - '${JELLYFIN_HTTPS_PORT}:8920'
+      - '${JELLYFIN_CLIENT_DISCOVERY_PORT}:7359'
