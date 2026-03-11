@@ -1,0 +1,14 @@
+services:
+  dozzle:
+    container_name: dozzle
+    image: amir20/dozzle:v8.12.8
+    restart: unless-stopped
+    ports:
+      - "${DOZZLE_WEB_PORT}:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${DOCKER_APPDATA_ROOT}/dozzle:/data
+    environment:
+      - TZ=${TZ}
+      - DOZZLE_ENABLE_ACTIONS=true
+      - DOZZLE_ENABLE_SHELL=true
