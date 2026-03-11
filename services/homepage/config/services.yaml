@@ -1,0 +1,50 @@
+---
+- Media:
+    - Jellyfin:
+        icon: jellyfin.png
+        href: "{{HOMEPAGE_VAR_JELLYFIN_URL}}"
+        description: Media streaming
+        server: my-docker
+        container: jellyfin
+
+    - Immich:
+        icon: immich.png
+        href: "{{HOMEPAGE_VAR_PHOTOS_URL}}"
+        description: Photo management
+        server: my-docker
+        container: immich_server
+
+    - Filestash:
+        icon: filestash.png
+        href: "{{HOMEPAGE_VAR_FILES_URL}}"
+        description: File manager
+        server: my-docker
+        container: filestash
+
+- Infrastructure:
+    - Home Assistant:
+        icon: home-assistant.png
+        href: "{{HOMEPAGE_VAR_HOMEASSISTANT_URL}}"
+        description: Smart home
+
+    - AdGuard Home:
+        icon: adguard-home.png
+        href: "{{HOMEPAGE_VAR_ADGUARD_URL}}"
+        description: DNS & ad blocking
+
+    - Unifi:
+        icon: unifi.png
+        href: "{{HOMEPAGE_VAR_UNIFI_URL}}"
+        description: Network management
+
+    - Z-Wave JS UI:
+        icon: z-wave.png
+        href: "{{HOMEPAGE_VAR_ZWAVE_URL}}"
+        description: Z-Wave controller
+
+    - Dozzle:
+        icon: dozzle.png
+        href: "{{HOMEPAGE_VAR_DOZZLE_URL}}"
+        description: Docker logs
+        server: my-docker
+        container: dozzle

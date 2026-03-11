@@ -1,0 +1,10 @@
+---
+title: Federman Homelab
+headerStyle: clean
+layout:
+  Media:
+    style: row
+    columns: 3
+  Infrastructure:
+    style: row
+    columns: 3

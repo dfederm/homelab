@@ -1,0 +1,22 @@
+services:
+  homepage:
+    container_name: homepage
+    image: ghcr.io/gethomepage/homepage:v1.2.0
+    restart: unless-stopped
+    ports:
+      - "${HOMEPAGE_WEB_PORT}:3000"
+    volumes:
+      - ./config:/app/config
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - TZ=${TZ}
+      - HOMEPAGE_ALLOWED_HOSTS=localhost:${HOMEPAGE_WEB_PORT},${DOCKER_HOST_IP}:${HOMEPAGE_WEB_PORT}
+      # Derived from existing env vars so we don't duplicate URLs
+      - HOMEPAGE_VAR_ADGUARD_URL=http://${ADGUARDHOME_IP}:${ADGUARDHOME_WEB_PORT}
+      - HOMEPAGE_VAR_DOZZLE_URL=http://${DOCKER_HOST_IP}:${DOZZLE_WEB_PORT}
+      - HOMEPAGE_VAR_FILES_URL=https://${FILES_FQDN}
+      - HOMEPAGE_VAR_HOMEASSISTANT_URL=https://${HOMEASSISTANT_FQDN}
+      - HOMEPAGE_VAR_JELLYFIN_URL=https://${JELLYFIN_FQDN}
+      - HOMEPAGE_VAR_PHOTOS_URL=https://${PHOTOS_FQDN}
+      - HOMEPAGE_VAR_UNIFI_URL=https://${NETWORK_ROUTER_IP}
+      - HOMEPAGE_VAR_ZWAVE_URL=http://${ZWAVE_HOST}:${ZWAVE_WEB_PORT}

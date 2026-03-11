@@ -1,0 +1,8 @@
+# Files created by Homepage at startup
+logs/
+*.yaml
+!bookmarks.yaml
+!docker.yaml
+!services.yaml
+!settings.yaml
+!widgets.yaml
