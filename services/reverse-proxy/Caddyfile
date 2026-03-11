@@ -1,0 +1,30 @@
+# Jellyfin - Media streaming
+{$JELLYFIN_FQDN} {
+	reverse_proxy localhost:{$JELLYFIN_HTTP_PORT}
+}
+
+# Immich - Photo management
+{$PHOTOS_FQDN} {
+	reverse_proxy localhost:{$PHOTOS_HTTP_PORT}
+}
+
+# Filestash - Web file manager
+{$FILES_FQDN} {
+	# Block admin panel from external access
+	handle /admin/* {
+		respond "Denied" 403
+	}
+	handle {
+		reverse_proxy localhost:{$FILES_HTTP_PORT}
+	}
+}
+
+# Collabora Online - Document editing
+{$FILES_OFFICE_FQDN} {
+	reverse_proxy localhost:{$FILES_OFFICE_HTTP_PORT}
+}
+
+# Home Assistant - Smart home
+{$HOMEASSISTANT_FQDN} {
+	reverse_proxy {$HOMEASSISTANT_IP}:{$HOMEASSISTANT_HTTP_PORT}
+}

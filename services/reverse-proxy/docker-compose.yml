@@ -1,17 +1,13 @@
 services:
-  reverse-proxy:
-    container_name: reverse-proxy
-    image: ${DOCKER_REGISTRY}/reverse-proxy:latest
+  caddy:
+    container_name: caddy
+    image: caddy:2.9
+    # Use "always" instead of "unless-stopped" so the reverse proxy
+    # is never accidentally left down after a reboot.
     restart: always
-    tty: true
-    environment:
-      - ASPNETCORE_HTTP_PORTS=${REVERSE_PROXY_HTTP_PORT}
-      - ASPNETCORE_HTTPS_PORTS=${REVERSE_PROXY_HTTPS_PORT}
-      - REVERSE_PROXY_CONFIG_FILE=/etc/opt/reverse-proxy/reverse-proxy.json
-      - REVERSE_PROXY_CERTIFICATE_DIRECTORY=/certs
+    network_mode: host
+    env_file: .env
     volumes:
-      - ${DOCKER_APPDATA_ROOT}/reverse-proxy:/etc/opt/reverse-proxy
-      - ${DOCKER_APPDATA_ROOT}/shared/certs/letsencrypt:/certs
-    ports:
-      - '${REVERSE_PROXY_HTTP_PORT}:${REVERSE_PROXY_HTTP_PORT}'
-      - '${REVERSE_PROXY_HTTPS_PORT}:${REVERSE_PROXY_HTTPS_PORT}'
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ${DOCKER_APPDATA_ROOT}/caddy/data:/data
+      - ${DOCKER_APPDATA_ROOT}/caddy/config:/config

@@ -30,7 +30,7 @@ echo "Pulling containers"
 docker compose pull
 
 echo "Updating containers"
-docker compose up --force-recreate --build -d
+docker compose up --force-recreate --remove-orphans --build -d
 
 echo "Pruning unused images"
 docker image prune -f

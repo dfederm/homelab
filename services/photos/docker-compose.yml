@@ -19,7 +19,7 @@ services:
       - DB_USERNAME=${IMMICH_DB_USERNAME}
       - DB_PASSWORD=${IMMICH_DB_PASSWORD}
     ports:
-      - '2283:2283'
+      - '${PHOTOS_HTTP_PORT}:2283'
     depends_on:
       - redis
       - database
