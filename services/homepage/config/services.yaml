@@ -48,3 +48,18 @@
         description: Docker logs
         server: my-docker
         container: dozzle
+
+- Monitoring:
+    - Beszel:
+        icon: beszel.png
+        href: "{{HOMEPAGE_VAR_BESZEL_URL}}"
+        description: System monitoring
+        server: my-docker
+        container: beszel
+
+    - Uptime Kuma:
+        icon: uptime-kuma.png
+        href: "{{HOMEPAGE_VAR_UPTIMEKUMA_URL}}"
+        description: Service health
+        server: my-docker
+        container: uptime-kuma

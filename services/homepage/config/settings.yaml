@@ -8,3 +8,6 @@ layout:
   Infrastructure:
     style: row
     columns: 3
+  Monitoring:
+    style: row
+    columns: 3

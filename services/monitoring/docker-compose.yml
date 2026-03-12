@@ -1,0 +1,56 @@
+services:
+  beszel:
+    container_name: beszel
+    image: henrygd/beszel:0.18.4
+    restart: unless-stopped
+    ports:
+      - "${BESZEL_WEB_PORT}:8090"
+    volumes:
+      # Named volume because SQLite doesn't work on SMB mounts (file locking).
+      # After Proxmox migration (direct ZFS), move to ${DOCKER_APPDATA_ROOT}/beszel.
+      - beszel-data:/beszel_data
+      - beszel-socket:/beszel_socket
+    environment:
+      - TZ=${TZ}
+
+  beszel-agent:
+    container_name: beszel-agent
+    image: henrygd/beszel-agent:0.18.4
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - beszel-socket:/beszel_socket
+      # Named volume for same SMB/SQLite reason as hub
+      - beszel-agent-data:/var/lib/beszel-agent
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - LISTEN=/beszel_socket/beszel.sock
+      # KEY is set after first hub setup — add to .env after creating the agent in the UI
+      - KEY=${BESZEL_AGENT_KEY}
+
+  uptime-kuma:
+    container_name: uptime-kuma
+    image: louislam/uptime-kuma:2.2.1
+    restart: unless-stopped
+    ports:
+      - "${UPTIME_KUMA_WEB_PORT}:3001"
+    volumes:
+      - ${DOCKER_APPDATA_ROOT}/uptime-kuma:/app/data
+    environment:
+      - TZ=${TZ}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001"]
+      interval: 30s
+      retries: 3
+      start_period: 10s
+      timeout: 5s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  beszel-data:
+  beszel-agent-data:
+  beszel-socket:
