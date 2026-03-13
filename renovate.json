@@ -9,12 +9,18 @@
   "packageRules": [
     {
       "description": "Group all Docker image updates",
-      "matchDatasources": ["docker"],
+      "matchDatasources": [
+        "docker"
+      ],
       "groupName": "docker images",
-      "schedule": ["before 6am on Monday"]
+      "schedule": [
+        "before 6am on Monday"
+      ]
     }
   ],
   "docker-compose": {
-    "fileMatch": ["services/.+/docker-compose\\.yml$"]
+    "managerFilePatterns": [
+      "/services/.+/docker-compose\\.yml$/"
+    ]
   }
 }
