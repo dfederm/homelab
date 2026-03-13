@@ -6,16 +6,28 @@
     "docker:pinDigests",
     ":dependencyDashboard"
   ],
+  "rebaseWhen": "behind-base-branch",
   "packageRules": [
     {
-      "description": "Group all Docker image updates",
+      "description": "Check for Docker image updates daily",
       "matchDatasources": [
         "docker"
       ],
-      "groupName": "docker images",
       "schedule": [
-        "before 6am on Monday"
+        "before 6am every day"
       ]
+    },
+    {
+      "description": "Don't update dependencies managed by upstream app authors",
+      "matchDatasources": [
+        "docker"
+      ],
+      "matchPackageNames": [
+        "ghcr.io/immich-app/postgres",
+        "docker.io/valkey/valkey",
+        "collabora/code"
+      ],
+      "enabled": false
     }
   ],
   "docker-compose": {
