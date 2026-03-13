@@ -1,7 +1,7 @@
 services:
   beszel:
     container_name: beszel
-    image: henrygd/beszel:0.18.4
+    image: henrygd/beszel:0.18.4@sha256:64bcaa60d1ed4149f0628c70cf68044b5d1ea90b3437de41e009e873f50e3f36
     restart: unless-stopped
     ports:
       - "${BESZEL_WEB_PORT}:8090"
@@ -15,7 +15,7 @@ services:
 
   beszel-agent:
     container_name: beszel-agent
-    image: henrygd/beszel-agent:0.18.4
+    image: henrygd/beszel-agent:0.18.4@sha256:00829897142460910ed1de162b166d2494916c061ecdb092de3b0653818c02b9
     restart: unless-stopped
     network_mode: host
     volumes:
@@ -30,7 +30,7 @@ services:
 
   uptime-kuma:
     container_name: uptime-kuma
-    image: louislam/uptime-kuma:2.2.1
+    image: louislam/uptime-kuma:2.2.1@sha256:7337368a77873f159435de9ef09567f68c31285ed5f951dec36256c4b267ee44
     restart: unless-stopped
     ports:
       - "${UPTIME_KUMA_WEB_PORT}:3001"

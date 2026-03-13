@@ -2,7 +2,8 @@
 services:
   app:
     container_name: filestash
-    image: machines/filestash:latest
+    # Filestash only publishes :latest (no versioned tags), so pin by digest
+    image: machines/filestash:latest@sha256:e8c2b8183121d0c632d65770900826a7a8bc84dca526dfb9115bbd3bc0e16fa4
     restart: unless-stopped
     environment:
     - APPLICATION_URL=
@@ -17,7 +18,7 @@ services:
 
   wopi_server:
     container_name: filestash_wopi
-    image: collabora/code:24.04.10.2.1
+    image: collabora/code:24.04.10.2.1@sha256:3ee501932bda6c85f4ef116d696cf4cce92387491c764ceb9684da57913b605a
     restart: unless-stopped
     environment:
     - "extra_params=--o:ssl.enable=false --o:ssl.termination=true"

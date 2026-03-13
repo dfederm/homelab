@@ -1,7 +1,7 @@
 services:
   dozzle:
     container_name: dozzle
-    image: amir20/dozzle:v8.12.8
+    image: amir20/dozzle:v10.1.1@sha256:0895bff1da9e54786f2875bf0538805514f162c031d16f7a07b5756de2214ce7
     restart: unless-stopped
     ports:
       - "${DOZZLE_WEB_PORT}:8080"
