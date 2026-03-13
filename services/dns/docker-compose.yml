@@ -38,6 +38,8 @@ services:
       - ${DOCKER_APPDATA_ROOT}/adguardhome/conf:/opt/adguardhome/conf
       - ${DOCKER_APPDATA_ROOT}/adguardhome/work:/opt/adguardhome/work
       #- ${DOCKER_APPDATA_ROOT}/shared/certs/example.com:/certs
+    environment:
+      - TZ=${TZ}
 
 networks:
   default:

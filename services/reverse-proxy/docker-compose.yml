@@ -11,3 +11,5 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ${DOCKER_APPDATA_ROOT}/caddy/data:/data
       - ${DOCKER_APPDATA_ROOT}/caddy/config:/config
+    environment:
+      - TZ=${TZ}
