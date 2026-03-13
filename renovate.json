@@ -1,0 +1,20 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    "docker:enableMajor",
+    "docker:pinDigests",
+    ":dependencyDashboard"
+  ],
+  "packageRules": [
+    {
+      "description": "Group all Docker image updates",
+      "matchDatasources": ["docker"],
+      "groupName": "docker images",
+      "schedule": ["before 6am on Monday"]
+    }
+  ],
+  "docker-compose": {
+    "fileMatch": ["services/.+/docker-compose\\.yml$"]
+  }
+}
