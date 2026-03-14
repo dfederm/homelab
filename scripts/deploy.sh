@@ -8,11 +8,10 @@
 set -euo pipefail
 
 SCRIPT=$(readlink -f "$0")
-REPO_DIR=$(dirname $(dirname "$SCRIPT"))
-LOG_FILE="/var/log/homelab-deploy.log"
+REPO_DIR=$(dirname "$(dirname "$SCRIPT")")
 
 log() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG_FILE"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
 }
 
 log "=== Deploy triggered ==="
@@ -20,13 +19,11 @@ log "Ref: ${1:-unknown}"
 
 cd "$REPO_DIR"
 
-# Pull latest changes
 log "Pulling latest changes..."
 git fetch origin main
 git reset --hard origin/main
 
-# Run all services
 log "Deploying all services..."
-bash "$REPO_DIR/scripts/run-all-services.sh" 2>&1 | tee -a "$LOG_FILE"
+bash "$REPO_DIR/scripts/run-all-services.sh"
 
 log "=== Deploy complete ==="
