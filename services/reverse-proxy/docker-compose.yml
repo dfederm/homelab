@@ -6,7 +6,7 @@ services:
     # is never accidentally left down after a reboot.
     restart: always
     network_mode: host
-    env_file: /etc/homelab.env
+    env_file: .env
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ${DOCKER_APPDATA_ROOT}/caddy/data:/data
