@@ -1,43 +1,32 @@
 #!/bin/bash
+# Deploy a single Docker Compose service.
+#
+# Usage: run-service.sh <service-name>
 
-# Absolute path to this script
+set -euo pipefail
+
 SCRIPT=$(readlink -f "$0")
+REPOPATH=$(dirname "$(dirname "$SCRIPT")")
+ENV_FILE="/etc/homelab.env"
 
-# Absolute path this script is in, thus /home/user/bin
-REPOPATH=$(dirname $(dirname "$SCRIPT"))
-
-if [ "$1" != "" ]; then
-    SERVICE=$1
-else
-    echo "Error: Provide a service name" 1>&2
+if [ -z "${1:-}" ]; then
+    echo "Error: Provide a service name" >&2
     exit 1
 fi
 
-echo "Service: $SERVICE"
+SERVICE="$1"
+SERVICEPATH="$REPOPATH/services/$SERVICE"
 
-SERVICEPATH="$REPOPATH/services/$SERVICE/"
 if [ ! -f "$SERVICEPATH/docker-compose.yml" ]; then
-    echo "Error: Service $SERVICE does not exist" 1>&2
+    echo "Error: Service $SERVICE does not exist" >&2
     exit 1
 fi
 
-echo "Creating symlink to .env"
-ln -sf "$REPOPATH/.env" "$SERVICEPATH/.env"
+echo "Deploying: $SERVICE"
 
-pushd "$SERVICEPATH"
+cd "$SERVICEPATH"
 
-echo "Pulling containers"
-docker compose pull
-
-echo "Updating containers"
-docker compose up --force-recreate --remove-orphans --build -d
-
-echo "Pruning unused images"
+docker compose --env-file "$ENV_FILE" pull
+docker compose --env-file "$ENV_FILE" up --force-recreate --remove-orphans --build -d
 docker image prune -f
-
-echo "Pruning unused volumes"
 docker volume prune -f
-
-popd
-
-exit 0
