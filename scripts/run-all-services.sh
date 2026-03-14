@@ -4,16 +4,18 @@
 #
 # Usage: ./scripts/run-all-services.sh
 
-SCRIPT=$(readlink -f "$0")
-REPOPATH=$(dirname $(dirname "$SCRIPT"))
+set -euo pipefail
 
-# Source .env for the service list
-if [ -f "$REPOPATH/.env" ]; then
-    HOMELAB_SERVICES=$(grep '^HOMELAB_SERVICES=' "$REPOPATH/.env" | cut -d= -f2-)
+SCRIPT=$(readlink -f "$0")
+REPOPATH=$(dirname "$(dirname "$SCRIPT")")
+ENV_FILE="/etc/homelab.env"
+
+if [ -f "$ENV_FILE" ]; then
+    HOMELAB_SERVICES=$(grep '^HOMELAB_SERVICES=' "$ENV_FILE" | cut -d= -f2-)
 fi
 
 if [ -z "${HOMELAB_SERVICES:-}" ]; then
-    echo "Error: HOMELAB_SERVICES not set in .env" 1>&2
+    echo "Error: HOMELAB_SERVICES not set in $ENV_FILE" >&2
     exit 1
 fi
 
