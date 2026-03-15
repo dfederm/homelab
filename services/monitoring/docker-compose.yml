@@ -25,7 +25,8 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
       - LISTEN=/beszel_socket/beszel.sock
-      # KEY is set after first hub setup — add to .env after creating the agent in the UI
+      # KEY is set after first hub setup — copy the public key from the hub UI when adding a system.
+      # Host/IP in the hub UI should be /beszel_socket/beszel.sock (socket mode, not TCP).
       - KEY=${BESZEL_AGENT_KEY}
 
   uptime-kuma:
