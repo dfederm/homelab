@@ -77,6 +77,7 @@ Modules are standalone, idempotent scripts in `scripts/setup/modules/`. Each han
 | `create-lxcs` | Create/update LXC containers from env var definitions | Proxmox host |
 | `create-vms` | Create/update VMs (e.g. Home Assistant) | Proxmox host |
 | `create-users` | Create Linux users/groups with aligned UIDs across machines | Docker LXC, NAS LXC |
+| `configure-macvlan-bridge` | Persist macvlan bridge so host can reach macvlan containers | Docker LXC |
 | `install-docker` | Install Docker Engine from official apt repo | Docker LXC |
 | `install-samba` | Install Samba, generate smb.conf from env vars | NAS LXC |
 | `install-tools` | Install common utilities (git, jq, htop, curl) | All machines |
@@ -92,7 +93,7 @@ setup.sh on Proxmox host
   → configure-ssh (harden SSH, deploy keys)
   → create-lxcs
     → creates Docker LXC, then runs setup.sh inside it
-      → create-users, install-tools, configure-ssh, install-docker
+      → create-users, install-tools, configure-ssh, install-docker, configure-macvlan-bridge
     → creates NAS LXC, then runs setup.sh inside it
       → create-users, install-tools, configure-ssh, install-samba, set-share-permissions
   → create-vms (Home Assistant)
