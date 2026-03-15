@@ -8,6 +8,7 @@ set -euo pipefail
 SCRIPT=$(readlink -f "$0")
 REPOPATH=$(dirname "$(dirname "$SCRIPT")")
 ENV_FILE=$(readlink -f "/etc/homelab.env")
+COMMON_ENV="$(dirname "$ENV_FILE")/common.env"
 
 if [ -z "${1:-}" ]; then
     echo "Error: Provide a service name" >&2
@@ -30,7 +31,14 @@ cd "$SERVICEPATH"
 # Resolving the symlink avoids snap Docker filesystem restrictions.
 ln -sf "$ENV_FILE" "$SERVICEPATH/.env"
 
-docker compose --env-file "$ENV_FILE" pull
-docker compose --env-file "$ENV_FILE" up --force-recreate --remove-orphans --build -d
+# Build env-file args (common first, machine-specific overrides)
+ENV_ARGS=()
+if [ -f "$COMMON_ENV" ]; then
+    ENV_ARGS+=(--env-file "$COMMON_ENV")
+fi
+ENV_ARGS+=(--env-file "$ENV_FILE")
+
+docker compose "${ENV_ARGS[@]}" pull
+docker compose "${ENV_ARGS[@]}" up --force-recreate --remove-orphans --build -d
 docker image prune -f
 docker volume prune -f
