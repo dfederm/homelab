@@ -43,17 +43,18 @@ collect_mount_args() {
 
 # Add GPU passthrough entries to the LXC config if _GPU=1.
 # These are raw lxc.* directives that can't go through pct set.
+# Returns 0 if config was changed, 1 if already configured or skipped.
 configure_gpu_passthrough() {
     local vmid="$1"
     local prefix="$2"
     local gpu_var="${prefix}_GPU"
 
-    [ "${!gpu_var:-0}" != "1" ] && return 0
+    [ "${!gpu_var:-0}" != "1" ] && return 1
 
     if [ ! -d /dev/dri ]; then
         echo "  WARNING: ${prefix}_GPU=1 but /dev/dri not found — skipping"
         echo "  Ensure GPU drivers are loaded (e.g. configure-amdgpu)"
-        return 0
+        return 1
     fi
 
     local conf="/etc/pve/lxc/${vmid}.conf"
@@ -71,11 +72,9 @@ configure_gpu_passthrough() {
 
     if [ "$changed" = true ]; then
         echo "  GPU passthrough configured"
-        if [ "$(pct status "$vmid" | awk '{print $2}')" = "running" ]; then
-            echo "  Restarting LXC for GPU passthrough..."
-            pct reboot "$vmid"
-        fi
+        return 0
     fi
+    return 1
 }
 
 # Create or update an LXC. COMMON_ARGS go to both pct create/set.
@@ -107,7 +106,7 @@ create_or_update_lxc() {
                 net*)
                     # Strip auto-assigned hwaddr and type, sort for order-independent compare
                     local cur_sorted des_sorted
-                    cur_sorted=$(echo "$current" | sed 's/,hwaddr=[^,]*//;s/,type=veth//' | tr ',' '\n' | sort | tr '\n' ',' | sed 's/,$//')
+                    cur_sorted=$(echo "$current" | sed 's/^hwaddr=[^,]*,//;s/,hwaddr=[^,]*//;s/^type=veth,//;s/,type=veth//' | tr ',' '\n' | sort | tr '\n' ',' | sed 's/,$//')
                     des_sorted=$(echo "$desired" | tr ',' '\n' | sort | tr '\n' ',' | sed 's/,$//')
                     [ "$cur_sorted" != "$des_sorted" ] && needs_update=true
                     ;;
@@ -120,17 +119,24 @@ create_or_update_lxc() {
             i=$((i + 2))
         done
 
+        local needs_restart=false
+
         if [ "$needs_update" = true ]; then
             pct set "$vmid" "${_common[@]}"
-            if [ "$(pct status "$vmid" | awk '{print $2}')" = "running" ]; then
-                echo "Config changed, restarting LXC..."
-                pct reboot "$vmid"
-            else
-                echo "Config changed (will take effect on next start)"
-            fi
-            echo "$label $vmid updated"
+            needs_restart=true
+            echo "$label $vmid config updated"
         else
             echo "$label $vmid config unchanged"
+        fi
+
+        # GPU passthrough — apply before restart so one reboot covers both
+        if configure_gpu_passthrough "$vmid" "$label"; then
+            needs_restart=true
+        fi
+
+        if [ "$needs_restart" = true ] && [ "$(pct status "$vmid" | awk '{print $2}')" = "running" ]; then
+            echo "Restarting LXC..."
+            pct reboot "$vmid"
         fi
     else
         local template_file template
@@ -142,10 +148,10 @@ create_or_update_lxc() {
         template="local:vztmpl/$(basename "$template_file")"
         pct create "$vmid" "$template" "${_common[@]}" "${_create_only[@]}"
         echo "$label $vmid created"
-    fi
 
-    # GPU passthrough (raw lxc.* entries, can't go through pct set)
-    configure_gpu_passthrough "$vmid" "$label"
+        # GPU passthrough — entries applied before first start
+        configure_gpu_passthrough "$vmid" "$label" || true
+    fi
 
     # Ensure running
     if [ "$(pct status "$vmid" 2>/dev/null | awk '{print $2}')" != "running" ]; then
