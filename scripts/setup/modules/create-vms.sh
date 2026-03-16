@@ -33,20 +33,41 @@ create_or_update_vm() {
     local -n _create_only="$4"
 
     if qm status "$vmid" &>/dev/null; then
-        echo "$prefix VM $vmid already exists, updating config..."
-        local config_before config_after
-        config_before=$(qm config "$vmid" | md5sum)
-        qm set "$vmid" "${_common[@]}"
-        config_after=$(qm config "$vmid" | md5sum)
-        if [ "$config_before" != "$config_after" ]; then
-            if [ "$(qm status "$vmid" | awk '{print $2}')" = "running" ]; then
-                echo "Config changed, restarting VM..."
-                qm reboot "$vmid"
-            else
-                echo "Config changed (will take effect on next start)"
+        echo "$prefix VM $vmid already exists, checking config..."
+
+        # Compare desired config with current to avoid unnecessary restarts.
+        # qm set on a running VM tries to hot-plug devices (e.g. net0) which
+        # can fail, so we only stop + apply when something actually changed.
+        local needs_update=false
+        local current_config
+        current_config=$(qm config "$vmid")
+
+        local i=0
+        while [ $i -lt ${#_common[@]} ]; do
+            local key="${_common[$i]#--}"
+            local desired="${_common[$((i+1))]}"
+            local current
+            current=$(echo "$current_config" | awk -F': ' -v k="$key" '$1 == k {print $2}')
+            # Strip auto-assigned MAC address for net interface comparison
+            current=$(echo "$current" | sed 's/=[A-Fa-f0-9:]\{17\}//')
+
+            if [ "$current" != "$desired" ]; then
+                needs_update=true
+                break
             fi
+            i=$((i + 2))
+        done
+
+        if [ "$needs_update" = true ]; then
+            if [ "$(qm status "$vmid" | awk '{print $2}')" = "running" ]; then
+                echo "Stopping VM for config update..."
+                qm shutdown "$vmid" --timeout 30 2>/dev/null || qm stop "$vmid"
+            fi
+            qm set "$vmid" "${_common[@]}"
+            echo "$prefix VM $vmid config updated"
+        else
+            echo "$prefix VM $vmid config unchanged"
         fi
-        echo "$prefix VM $vmid updated"
     else
         qm create "$vmid" "${_common[@]}" "${_create_only[@]}"
 
