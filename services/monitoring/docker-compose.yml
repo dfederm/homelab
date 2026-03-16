@@ -6,9 +6,7 @@ services:
     ports:
       - "${BESZEL_WEB_PORT}:8090"
     volumes:
-      # Named volume because SQLite doesn't work on SMB mounts (file locking).
-      # After Proxmox migration (direct ZFS), move to ${DOCKER_APPDATA_ROOT}/beszel.
-      - beszel-data:/beszel_data
+      - ${DOCKER_APPDATA_ROOT}/beszel:/beszel_data
       - beszel-socket:/beszel_socket
     environment:
       - TZ=${TZ}
@@ -20,8 +18,7 @@ services:
     network_mode: host
     volumes:
       - beszel-socket:/beszel_socket
-      # Named volume for same SMB/SQLite reason as hub
-      - beszel-agent-data:/var/lib/beszel-agent
+      - ${DOCKER_APPDATA_ROOT}/beszel-agent:/var/lib/beszel-agent
       - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
       - LISTEN=/beszel_socket/beszel.sock
@@ -52,6 +49,4 @@ services:
         max-file: "3"
 
 volumes:
-  beszel-data:
-  beszel-agent-data:
   beszel-socket:

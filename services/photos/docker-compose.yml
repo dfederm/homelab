@@ -35,7 +35,7 @@ services:
     #   file: hwaccel.ml.yml
     #   service: cpu # set to one of [armnn, cuda, openvino, openvino-wsl] for accelerated inference - use the `-wsl` version for WSL2 where applicable
     volumes:
-      - model-cache:/cache
+      - ${DOCKER_APPDATA_ROOT}/immich/model-cache:/cache
     environment:
       - TZ=${TZ}
     restart: always
@@ -58,11 +58,6 @@ services:
       POSTGRES_PASSWORD: ${IMMICH_DB_PASSWORD}
       POSTGRES_INITDB_ARGS: '--data-checksums'
     volumes:
-      # Using a named volume instead of mapping to appdata since there are permissions issues when using an SMB mount.
-      - database-data:/var/lib/postgresql/data
+      - ${DOCKER_APPDATA_ROOT}/immich/database:/var/lib/postgresql/data
     shm_size: 128mb
     restart: always
-
-volumes:
-  model-cache:
-  database-data:
