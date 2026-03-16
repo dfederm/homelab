@@ -1,10 +1,10 @@
 # Homelab
 
-Declarative configuration for a single-machine homelab running [Proxmox VE](https://www.proxmox.com/en/proxmox-virtual-environment/overview). All services, infrastructure, and machine setup are defined in this repo and applied via idempotent scripts.
+Declarative configuration for a homelab running [Proxmox VE](https://www.proxmox.com/en/proxmox-virtual-environment/overview). All services, infrastructure, and machine setup are defined in this repo and applied via idempotent scripts.
 
 ## Architecture
 
-A single physical server runs Proxmox with LXC containers and VMs:
+The primary server runs Proxmox with LXC containers and VMs. Additional machines (e.g. a Raspberry Pi) can use the same setup system with their own env files.
 
 - **Proxmox host** — ZFS pool, GPU driver, creates and manages LXCs/VMs
 - **Docker LXC** — Runs all containerized services (Jellyfin, Immich, AdGuard, etc.)
