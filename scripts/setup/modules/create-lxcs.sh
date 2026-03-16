@@ -14,6 +14,9 @@
 #   _VMID, _HOSTNAME, _IP, _MEMORY_MIB, _CORES, _ROOTFS_GIB, _NESTING
 #   _MP0 (and optionally _MP1, _MP2, ...)
 #
+# Optional env vars per prefix:
+#   _GPU (set to 1 to pass through /dev/dri for hardware transcoding)
+#
 # Global env vars: NETWORK_ROUTER_IP, NETWORK_PREFIX, DNS_IP
 
 set -euo pipefail
@@ -36,6 +39,43 @@ collect_mount_args() {
         _mounts+=(--mp${i} "$mp_val")
         i=$((i + 1))
     done
+}
+
+# Add GPU passthrough entries to the LXC config if _GPU=1.
+# These are raw lxc.* directives that can't go through pct set.
+configure_gpu_passthrough() {
+    local vmid="$1"
+    local prefix="$2"
+    local gpu_var="${prefix}_GPU"
+
+    [ "${!gpu_var:-0}" != "1" ] && return 0
+
+    if [ ! -d /dev/dri ]; then
+        echo "  WARNING: ${prefix}_GPU=1 but /dev/dri not found — skipping"
+        echo "  Ensure GPU drivers are loaded (e.g. configure-amdgpu)"
+        return 0
+    fi
+
+    local conf="/etc/pve/lxc/${vmid}.conf"
+    local changed=false
+
+    if ! grep -q "lxc.cgroup2.devices.allow: c 226:" "$conf"; then
+        echo "lxc.cgroup2.devices.allow: c 226:* rwm" >> "$conf"
+        changed=true
+    fi
+
+    if ! grep -q "lxc.mount.entry: /dev/dri" "$conf"; then
+        echo "lxc.mount.entry: /dev/dri dev/dri none bind,optional,create=dir" >> "$conf"
+        changed=true
+    fi
+
+    if [ "$changed" = true ]; then
+        echo "  GPU passthrough configured"
+        if [ "$(pct status "$vmid" | awk '{print $2}')" = "running" ]; then
+            echo "  Restarting LXC for GPU passthrough..."
+            pct reboot "$vmid"
+        fi
+    fi
 }
 
 # Create or update an LXC. COMMON_ARGS go to both pct create/set.
@@ -103,6 +143,9 @@ create_or_update_lxc() {
         pct create "$vmid" "$template" "${_common[@]}" "${_create_only[@]}"
         echo "$label $vmid created"
     fi
+
+    # GPU passthrough (raw lxc.* entries, can't go through pct set)
+    configure_gpu_passthrough "$vmid" "$label"
 
     # Ensure running
     if [ "$(pct status "$vmid" 2>/dev/null | awk '{print $2}')" != "running" ]; then

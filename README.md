@@ -76,7 +76,7 @@ Modules are standalone, idempotent scripts in `scripts/setup/modules/`. Each han
 | `configure-macvlan-bridge` | Persist macvlan bridge so host can reach macvlan containers | Docker LXC |
 | `configure-proxmox-repos` | Switch from paid enterprise repos to free community repos | Proxmox host |
 | `configure-ssh` | Harden SSH (key-only auth) and deploy authorized keys | All machines |
-| `create-lxcs` | Create/update LXC containers from env var definitions | Proxmox host |
+| `create-lxcs` | Create/update LXC containers from env var definitions (supports GPU passthrough via `_GPU=1`) | Proxmox host |
 | `create-vms` | Create/update VMs (e.g. Home Assistant) | Proxmox host |
 | `create-users` | Create Linux users/groups with aligned UIDs across machines | Docker LXC, NAS LXC |
 | `install-docker` | Install Docker Engine from official apt repo | Docker LXC |
@@ -92,7 +92,7 @@ The `create-lxcs` module doesn't just create containers — after creation, it r
 setup.sh on Proxmox host
   → configure-proxmox-repos, install-tools, configure-amdgpu, configure-ssh
   → create-lxcs
-    → creates Docker LXC, then runs setup.sh inside it
+    → creates Docker LXC (GPU passthrough if _GPU=1), then runs setup.sh inside it
       → create-users, install-tools, configure-ssh, install-docker, configure-macvlan-bridge
     → creates NAS LXC, then runs setup.sh inside it
       → create-users, install-tools, configure-ssh, install-samba, set-share-permissions

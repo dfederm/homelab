@@ -11,6 +11,8 @@ services:
       - ${JELLYFIN_MEDIA_LOCATION}/Movies:/movies
       - ${JELLYFIN_MEDIA_LOCATION}/TV:/shows
       - ${JELLYFIN_MEDIA_LOCATION}/Music:/music
+    devices:
+      - /dev/dri:/dev/dri
     ports:
       - '${JELLYFIN_HTTP_PORT}:8096'
       - '${JELLYFIN_CLIENT_DISCOVERY_PORT}:7359'
