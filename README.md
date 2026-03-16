@@ -26,6 +26,7 @@ All data lives on a ZFS pool and is bind-mounted into containers. The LXC root f
 │   ├── lib.sh             # Shared helper functions (sourced by other scripts)
 │   ├── run-all-services.sh
 │   ├── run-service.sh     # Deploy a single Docker Compose service
+│   ├── update.sh          # Update system packages on host and all LXCs
 │   └── setup/
 │       ├── setup.sh       # Main setup runner (see below)
 │       └── modules/       # Idempotent setup modules
@@ -149,6 +150,16 @@ The `configure-ssh` module hardens SSH on every machine (Proxmox host and all LX
 To add or rotate keys, edit `<mount>/homelab/config/authorized_keys` and re-run `setup.sh`. One file, all machines.
 
 Home Assistant uses its own SSH add-on (configured through the HA UI), not this module.
+
+### System Updates
+
+Run `scripts/update.sh` on the Proxmox host to update all system packages:
+
+```bash
+bash scripts/update.sh
+```
+
+This runs `apt full-upgrade` on each running LXC first, then on the host. If a host reboot is required (e.g. kernel update), it will tell you. VMs are not included — Home Assistant manages its own updates through its UI.
 
 ### Users & Groups
 
