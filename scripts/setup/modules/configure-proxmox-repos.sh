@@ -14,6 +14,12 @@ fi
 
 CHANGED=false
 CODENAME=$(. /etc/os-release && echo "$VERSION_CODENAME")
+SIGNING_KEY="/etc/apt/trusted.gpg.d/proxmox-release-$CODENAME.gpg"
+
+if [ ! -f "$SIGNING_KEY" ]; then
+    echo "Error: Signing key not found at $SIGNING_KEY"
+    exit 1
+fi
 
 # Remove any enterprise repo files (both legacy .list and modern .sources formats)
 for f in /etc/apt/sources.list.d/pve-enterprise.list /etc/apt/sources.list.d/pve-enterprise.sources \
@@ -24,21 +30,36 @@ for f in /etc/apt/sources.list.d/pve-enterprise.list /etc/apt/sources.list.d/pve
     fi
 done
 
-# Add no-subscription repo if missing
+# Ensure no-subscription repo is configured with signed-by
 NSR="/etc/apt/sources.list.d/pve-no-subscription.list"
 NSR_SOURCES="/etc/apt/sources.list.d/pve-no-subscription.sources"
-if [ ! -f "$NSR" ] && [ ! -f "$NSR_SOURCES" ]; then
-    # Use DEB822 format if the system already uses .sources files, otherwise legacy .list
-    if ls /etc/apt/sources.list.d/*.sources &> /dev/null; then
-        cat > "$NSR_SOURCES" <<EOF
+TEMP_FILE=$(mktemp)
+trap 'rm -f "$TEMP_FILE"' EXIT
+
+# Use DEB822 format if already using .sources, otherwise legacy .list
+if [ -f "$NSR_SOURCES" ] || { [ ! -f "$NSR" ] && ls /etc/apt/sources.list.d/*.sources &> /dev/null; }; then
+    TARGET="$NSR_SOURCES"
+    cat > "$TEMP_FILE" <<EOF
 Types: deb
 URIs: http://download.proxmox.com/debian/pve
 Suites: $CODENAME
 Components: pve-no-subscription
+Signed-By: $SIGNING_KEY
 EOF
-    else
-        echo "deb http://download.proxmox.com/debian/pve $CODENAME pve-no-subscription" > "$NSR"
+    # Clean up legacy format if present
+    if [ -f "$NSR" ]; then
+        rm -f "$NSR"
+        CHANGED=true
     fi
+else
+    TARGET="$NSR"
+    echo "deb [signed-by=$SIGNING_KEY] http://download.proxmox.com/debian/pve $CODENAME pve-no-subscription" > "$TEMP_FILE"
+fi
+
+if [ -f "$TARGET" ] && cmp -s "$TEMP_FILE" "$TARGET"; then
+    rm "$TEMP_FILE"
+else
+    mv "$TEMP_FILE" "$TARGET"
     CHANGED=true
 fi
 
