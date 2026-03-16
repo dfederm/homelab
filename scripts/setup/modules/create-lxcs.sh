@@ -47,20 +47,51 @@ create_or_update_lxc() {
     local -n _create_only="$4"
 
     if pct status "$vmid" &>/dev/null; then
-        echo "$label $vmid already exists, updating config..."
-        local config_before config_after
-        config_before=$(pct config "$vmid" | md5sum)
-        pct set "$vmid" "${_common[@]}"
-        config_after=$(pct config "$vmid" | md5sum)
-        if [ "$config_before" != "$config_after" ]; then
+        echo "$label $vmid already exists, checking config..."
+
+        # Compare desired config with current to avoid unnecessary restarts.
+        # pct set regenerates auto-assigned fields (hwaddr, type in net0),
+        # which causes false positives with naive md5sum comparison.
+        local needs_update=false
+        local current_config
+        current_config=$(pct config "$vmid")
+
+        local i=0
+        while [ $i -lt ${#_common[@]} ]; do
+            local key="${_common[$i]#--}"
+            local desired="${_common[$((i+1))]}"
+            local current
+            current=$(echo "$current_config" | awk -F': ' -v k="$key" '$1 == k {print $2}')
+
+            case "$key" in
+                net*)
+                    # Strip auto-assigned hwaddr and type, sort for order-independent compare
+                    local cur_sorted des_sorted
+                    cur_sorted=$(echo "$current" | sed 's/,hwaddr=[^,]*//;s/,type=veth//' | tr ',' '\n' | sort | tr '\n' ',' | sed 's/,$//')
+                    des_sorted=$(echo "$desired" | tr ',' '\n' | sort | tr '\n' ',' | sed 's/,$//')
+                    [ "$cur_sorted" != "$des_sorted" ] && needs_update=true
+                    ;;
+                *)
+                    [ "$current" != "$desired" ] && needs_update=true
+                    ;;
+            esac
+
+            [ "$needs_update" = true ] && break
+            i=$((i + 2))
+        done
+
+        if [ "$needs_update" = true ]; then
+            pct set "$vmid" "${_common[@]}"
             if [ "$(pct status "$vmid" | awk '{print $2}')" = "running" ]; then
                 echo "Config changed, restarting LXC..."
                 pct reboot "$vmid"
             else
                 echo "Config changed (will take effect on next start)"
             fi
+            echo "$label $vmid updated"
+        else
+            echo "$label $vmid config unchanged"
         fi
-        echo "$label $vmid updated"
     else
         local template_file template
         template_file=$(ls /var/lib/vz/template/cache/debian-*-standard_*_amd64.tar.zst 2>/dev/null | sort -V | tail -1)
