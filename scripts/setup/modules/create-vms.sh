@@ -123,6 +123,7 @@ for prefix in $HOMELAB_VMS; do
         --name "${!hostname_var}"
         --memory "${!memory_var}"
         --cores "${!cores_var}"
+        --onboot 1
         --scsihw virtio-scsi-pci
         --net0 "virtio,bridge=vmbr0"
     )

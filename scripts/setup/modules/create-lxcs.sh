@@ -202,6 +202,7 @@ for prefix in $HOMELAB_LXCS; do
         --hostname "${!hostname_var}"
         --memory "${!memory_var}"
         --cores "${!cores_var}"
+        --onboot 1
         --net0 "name=eth0,bridge=vmbr0,ip=${!ip_var}/${NETWORK_PREFIX},gw=${NETWORK_ROUTER_IP}"
         --nameserver "$DNS_IP"
     )
