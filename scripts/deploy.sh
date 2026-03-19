@@ -1,9 +1,11 @@
 #!/bin/bash
-# Deploy script triggered by webhook on git push to main.
-# Pulls latest changes and redeploys all services.
+# Deploy changes on this machine.
 #
-# Usage: ./scripts/deploy.sh [ref]
-#   ref: Git ref that was pushed (e.g., refs/heads/main). Optional.
+# Pulls latest repo changes, then runs setup.sh which handles both
+# setup modules and service deployment. Idempotent — unchanged modules
+# are no-ops and unchanged containers are not restarted.
+#
+# Usage: ./scripts/deploy.sh
 
 set -euo pipefail
 
@@ -14,16 +16,20 @@ log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
 }
 
-log "=== Deploy triggered ==="
-log "Ref: ${1:-unknown}"
+log "=== Deploy: $(hostname) ==="
 
 cd "$REPO_DIR"
+
+# Needed when the repo is bind-mounted from a different host/user
+if ! git config --global --get-all safe.directory 2>/dev/null | grep -qFx "$REPO_DIR"; then
+    git config --global --add safe.directory "$REPO_DIR"
+fi
 
 log "Pulling latest changes..."
 git fetch origin main
 git reset --hard origin/main
 
-log "Deploying all services..."
-bash "$REPO_DIR/scripts/run-all-services.sh"
+log "Running setup (modules + services)..."
+bash "$REPO_DIR/scripts/setup/setup.sh"
 
 log "=== Deploy complete ==="

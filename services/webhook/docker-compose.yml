@@ -1,0 +1,23 @@
+services:
+  webhook:
+    container_name: webhook
+    build: .
+    restart: always
+    ports:
+      - "${WEBHOOK_HTTP_PORT}:9000"
+    volumes:
+      - ./hooks.json:/etc/webhook/hooks.json:ro
+      - ${REPO_DIR}:/repo
+      - ${CONFIG_DIR}:/config/env:ro
+      - ${DEPLOY_KEY_PATH}:/config/deploy_key:ro
+      - /etc/homelab.env:/etc/homelab.env:ro
+      - /usr/bin/docker:/usr/bin/docker:ro
+      - /usr/libexec/docker/cli-plugins:/usr/libexec/docker/cli-plugins:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - TZ=${TZ}
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET}
+      - DEPLOY_KEY_PATH=/config/deploy_key
+      - CONFIG_DIR=/config/env
+    command: ["-template", "-hooks", "/etc/webhook/hooks.json", "-verbose"]
+    stop_grace_period: 60s
