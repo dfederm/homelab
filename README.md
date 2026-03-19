@@ -22,8 +22,10 @@ All data lives on a ZFS pool and is bind-mounted into containers. The LXC root f
 ├── renovate.json          # Automated Docker image update config
 ├── scripts/
 │   ├── backup/            # Database and volume backup scripts
-│   ├── deploy.sh          # CI/CD entrypoint (git pull + deploy services)
+│   ├── deploy.sh          # Deploy changes on this machine (setup + services)
+│   ├── dispatch.sh        # Webhook handler: fans out deploy.sh to all machines
 │   ├── lib.sh             # Shared helper functions (sourced by other scripts)
+│   ├── recreate-service.sh # Force-recreate a service container
 │   ├── run-all-services.sh
 │   ├── run-service.sh     # Deploy a single Docker Compose service
 │   ├── update.sh          # Update system packages on host and all LXCs
@@ -39,12 +41,13 @@ All data lives on a ZFS pool and is bind-mounted into containers. The LXC root f
     ├── monitoring/        # Beszel + Uptime Kuma
     ├── photos/            # Immich
     ├── reverse-proxy/     # Caddy
+    ├── webhook/           # CI/CD webhook receiver
     └── zwave/             # Z-Wave JS UI
 ```
 
 ## Setup System
 
-The setup system is designed so that a single command on the Proxmox host bootstraps or updates the entire stack — host config, LXC creation, and software installation inside each container.
+The setup system is designed so that a single command on the Proxmox host bootstraps or updates the entire stack — host config, LXC creation, software installation inside each container, and service deployment.
 
 ### How It Works
 
@@ -55,14 +58,11 @@ Each machine has a `.env` file (stored outside the repo at `<mount>/homelab/conf
 
 A shared `common.env` in the same directory holds values that must be identical across machines (timezone, network basics, users/groups). It is sourced automatically before the machine-specific file, so machine values can override common ones.
 
-The runner script discovers the env file automatically:
+The runner script discovers the env file automatically by hostname:
 
 ```bash
-# On the Proxmox host — auto-discovers config from hostname
+# On the Proxmox host — auto-discovers config/<hostname>.env
 bash /path/to/repo/scripts/setup/setup.sh
-
-# Or with an explicit path
-bash scripts/setup/setup.sh /path/to/host.env
 ```
 
 On first run, it creates a `/etc/homelab.env` symlink so subsequent runs need no arguments.
@@ -95,6 +95,7 @@ setup.sh on Proxmox host
   → create-lxcs
     → creates Docker LXC (GPU passthrough if _GPU=1), then runs setup.sh inside it
       → create-users, install-tools, configure-ssh, install-docker, configure-macvlan-bridge
+      → deploys HOMELAB_SERVICES (Jellyfin, Immich, Caddy, etc.)
     → creates NAS LXC, then runs setup.sh inside it
       → create-users, install-tools, configure-ssh, install-samba, set-share-permissions
   → create-vms (Home Assistant)
@@ -265,4 +266,24 @@ Docker images are pinned to specific versions with SHA256 digests for reproducib
 
 ## CI/CD
 
-`scripts/deploy.sh` is the deployment entry point — it pulls the latest repo changes and redeploys all services. Currently triggered manually; webhook-based automation is planned.
+Pushes to `main` are automatically deployed via a [webhook receiver](https://github.com/adnanh/webhook) running in the Docker LXC. The Docker LXC acts as the deployment coordinator — it fans out to all physical machines via SSH.
+
+### How It Works
+
+1. GitHub sends a push event to the webhook endpoint
+2. The webhook validates the HMAC-SHA256 signature and branch
+3. `dispatch.sh` SSHes to each deploy target
+4. Each machine's `deploy.sh` pulls latest changes and runs `setup.sh`
+5. `setup.sh` runs idempotent modules, then deploys services — unchanged modules are no-ops and unchanged containers don't restart
+
+Deploy targets are defined per the prefix-based pattern (`HOMELAB_DEPLOY_TARGETS`). Each target only needs a `_DEPLOY_HOST` — the machine's own env file determines what modules and services it runs.
+
+For manual deployments (e.g. after changing env files), run `deploy.sh` on the machine, or use `run-service.sh <name>` / `run-all-services.sh` directly. To force-recreate a container (e.g. after changing a bind-mounted config file), use `recreate-service.sh <name>`.
+
+### GitHub Webhook Configuration
+
+In the repo's Settings → Webhooks:
+- **URL:** `https://<webhook-fqdn>/deploy`
+- **Content type:** `application/json`
+- **Secret:** same value as `WEBHOOK_SECRET` in the env file
+- **Events:** "Just the push event"
