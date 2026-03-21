@@ -207,7 +207,7 @@ The NAS LXC runs Samba for SMB file sharing. Permissions are enforced at the **f
 
 When `SMB_ROOT_SHARE` is set, a single root share exposes all user folders and shared dirs. Users map one drive and navigate to their folder. ACLs prevent them from opening folders they don't have access to. Individual per-user shares and `adults`/`family` shares are omitted to keep the share list clean.
 
-Infrastructure shares (`media`, `homelab`) are admin-only — non-admin family members access media through applications (e.g. Jellyfin), not the raw files.
+Infrastructure shares (`media`, `homelab`) are admin-only — non-admin family members access media through applications (e.g. Jellyfin), not the raw files. The `homelab` share's `config/` and `backup/` subdirectories are set to `root:admin 775` so admin users can edit env files and write backups (e.g. Home Assistant) via SMB.
 
 Samba share definitions are **generated** by `install-samba` from the user/group env vars — no static config file to maintain. The `[global]` section lives in `nas/smb.conf.global` in the repo.
 

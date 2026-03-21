@@ -126,6 +126,11 @@ if [ -n "${SMB_HOMELAB_PATH:-}" ]; then
         chmod -R 775 "$SMB_HOMELAB_PATH/config"
     fi
 
+    # Backup dir needs admin write access (e.g. Home Assistant backups via SMB)
+    mkdir -p "$SMB_HOMELAB_PATH/backup"
+    chown root:admin "$SMB_HOMELAB_PATH/backup"
+    chmod 775 "$SMB_HOMELAB_PATH/backup"
+
     SMB_CONF="$SMB_CONF
 
 [homelab]
