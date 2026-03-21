@@ -22,8 +22,8 @@ All data lives on a ZFS pool and is bind-mounted into containers. The LXC root f
 ├── renovate.json          # Automated Docker image update config
 ├── scripts/
 │   ├── backup/            # Database and volume backup scripts
-│   ├── deploy.sh          # Deploy changes on this machine (setup + services)
-│   ├── dispatch.sh        # Webhook handler: fans out deploy.sh to all machines
+│   ├── deploy.sh          # Deploy changes on this machine (pull + setup)
+│   ├── dispatch.sh        # Webhook handler: pulls code, fans out setup to all machines
 │   ├── lib.sh             # Shared helper functions (sourced by other scripts)
 │   ├── recreate-service.sh # Force-recreate a service container
 │   ├── run-all-services.sh
@@ -266,17 +266,21 @@ Docker images are pinned to specific versions with SHA256 digests for reproducib
 
 ## CI/CD
 
-Pushes to `main` are automatically deployed via a [webhook receiver](https://github.com/adnanh/webhook) running in the Docker LXC. The Docker LXC acts as the deployment coordinator — it fans out to all physical machines via SSH.
+Pushes to `main` are automatically deployed via a [webhook receiver](https://github.com/adnanh/webhook) running in the Docker LXC. The Docker LXC acts as the deployment coordinator — it pulls the latest code centrally, then fans out to all machines via SSH.
 
 ### How It Works
 
 1. GitHub sends a push event to the webhook endpoint
 2. The webhook validates the HMAC-SHA256 signature and branch
-3. `dispatch.sh` SSHes to each deploy target
-4. Each machine's `deploy.sh` pulls latest changes and runs `setup.sh`
-5. `setup.sh` runs idempotent modules, then deploys services — unchanged modules are no-ops and unchanged containers don't restart
+3. `dispatch.sh` pulls latest code (`git fetch + reset`) — all machines share the repo via NAS mounts, so one pull updates it everywhere
+4. `dispatch.sh` SSHes to each deploy target and kicks off `setup.sh` asynchronously (fire-and-forget)
+5. Each machine's `setup.sh` runs idempotent modules, then deploys services — unchanged modules are no-ops and unchanged containers don't restart
+
+The async dispatch avoids a self-termination problem: a synchronous deploy chain would eventually restart the webhook container (which is itself a deployed service), killing the dispatch process mid-execution. With fire-and-forget, dispatch completes in seconds before any containers are restarted.
 
 Deploy targets are defined per the prefix-based pattern (`HOMELAB_DEPLOY_TARGETS`). Each target only needs a `_DEPLOY_HOST` — the machine's own env file determines what modules and services it runs.
+
+Deploy results are logged on each target at `/var/log/homelab-deploy.log`.
 
 For manual deployments (e.g. after changing env files), run `deploy.sh` on the machine, or use `run-service.sh <name>` / `run-all-services.sh` directly. To force-recreate a container (e.g. after changing a bind-mounted config file), use `recreate-service.sh <name>`.
 
