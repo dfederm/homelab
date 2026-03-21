@@ -48,6 +48,12 @@ if [ -f "$COMMON_ENV" ]; then
 fi
 ENV_ARGS+=(--env-file "$ENV_FILE")
 
+# Disable BuildKit provenance attestations. Without this, every build produces
+# a new attestation manifest (with timestamps), creating a different manifest
+# list digest even when layers are fully cached. Compose sees the new digest
+# as a changed image and recreates the container unnecessarily.
+export BUILDX_NO_DEFAULT_ATTESTATIONS=1
+
 docker compose "${ENV_ARGS[@]}" pull
 docker compose "${ENV_ARGS[@]}" up $FORCE --remove-orphans --build -d
 docker image prune -f
