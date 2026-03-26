@@ -129,6 +129,35 @@ create_or_update_lxc() {
             echo "$label $vmid config unchanged"
         fi
 
+        # Rootfs resize — expand if configured size exceeds current size.
+        # Only grows; never shrinks (shrinking risks data loss).
+        local rootfs_var="${label}_ROOTFS_GIB"
+        local desired_gib="${!rootfs_var}"
+        local current_gib
+        current_gib=$(echo "$current_config" | awk -F': ' '$1 == "rootfs" {print $2}' | grep -oP 'size=\K[0-9]+')
+        if [ -n "$desired_gib" ] && [ -n "$current_gib" ] && [ "$desired_gib" -gt "$current_gib" ]; then
+            local expand_by=$(( desired_gib - current_gib ))
+
+            # Check available space in the thin pool before resizing
+            local free_bytes free_gib
+            free_bytes=$(lvs --noheadings --nosuffix --units b -o lv_size /dev/pve/data 2>/dev/null | tr -d ' ')
+            local used_bytes
+            used_bytes=$(lvs --noheadings --nosuffix --units b -o data_percent /dev/pve/data 2>/dev/null | tr -d ' ')
+            free_gib=$(lvs --noheadings --nosuffix --units g -o lv_size /dev/pve/data 2>/dev/null | tr -d ' ')
+            local used_pct
+            used_pct=$(lvs --noheadings --nosuffix -o data_percent /dev/pve/data 2>/dev/null | tr -d ' ')
+            local avail_gib
+            avail_gib=$(awk "BEGIN {printf \"%d\", ${free_gib:-0} * (100 - ${used_pct:-100}) / 100}")
+
+            if [ "$expand_by" -gt "$avail_gib" ]; then
+                echo "  WARNING: Cannot resize rootfs — need ${expand_by}G but only ${avail_gib}G available in local-lvm"
+                echo "  Skipping resize for $label $vmid"
+            else
+                pct resize "$vmid" rootfs "+${expand_by}G"
+                echo "$label $vmid rootfs resized: ${current_gib}G → ${desired_gib}G"
+            fi
+        fi
+
         # GPU passthrough — apply before restart so one reboot covers both
         if configure_gpu_passthrough "$vmid" "$label"; then
             needs_restart=true
