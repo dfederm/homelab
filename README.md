@@ -33,6 +33,7 @@ All data lives on a ZFS pool and is bind-mounted into containers. The LXC root f
 │       ├── setup.sh       # Main setup runner (see below)
 │       └── modules/       # Idempotent setup modules
 └── services/              # Docker Compose service definitions
+    ├── backup/            # Rclone cloud backup
     ├── dns/               # AdGuard Home
     ├── dozzle/            # Docker log viewer
     ├── files/             # Filestash + Collabora
