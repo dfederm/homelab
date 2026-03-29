@@ -13,7 +13,7 @@ services:
 
   beszel-agent:
     container_name: beszel-agent
-    image: henrygd/beszel-agent:0.18.4@sha256:00829897142460910ed1de162b166d2494916c061ecdb092de3b0653818c02b9
+    image: henrygd/beszel-agent:0.18.5@sha256:28f42890c6efde336a56c83f976616e41226b5937c79cbb530f5a5ad242ace36
     restart: unless-stopped
     network_mode: host
     volumes:
