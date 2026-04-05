@@ -1,7 +1,7 @@
 services:
   beszel:
     container_name: beszel
-    image: henrygd/beszel:0.18.5@sha256:0f8f5e7741d3b5fb1c69d431223fad2f265dacfe93549cf35b1ca0ae2e5575fe
+    image: henrygd/beszel:0.18.7@sha256:a849ad80814b6a1a3be665304dcace5d4854b3bed7bde4dd1227e8ce1b82d477
     restart: unless-stopped
     ports:
       - "${BESZEL_WEB_PORT}:8090"
