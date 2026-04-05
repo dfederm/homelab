@@ -29,6 +29,11 @@
 	reverse_proxy {$HOMEASSISTANT_IP}:{$HOMEASSISTANT_HTTP_PORT}
 }
 
+# Forgejo - Git hosting
+{$FORGEJO_FQDN} {
+	reverse_proxy localhost:{$FORGEJO_HTTP_PORT}
+}
+
 # Webhook - CI/CD deployment trigger
 {$WEBHOOK_FQDN} {
 	rewrite * /hooks{uri}

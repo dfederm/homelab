@@ -1,0 +1,18 @@
+services:
+  forgejo:
+    container_name: forgejo
+    image: codeberg.org/forgejo/forgejo:14.0.3@sha256:8f4b1f86750e206824c669e1af17b6c6e8da9ed1a8ebda615db7526ee86d3eb2
+    restart: unless-stopped
+    environment:
+      - TZ=${TZ}
+      - FORGEJO__server__DOMAIN=${FORGEJO_FQDN}
+      - FORGEJO__server__ROOT_URL=https://${FORGEJO_FQDN}/
+      - FORGEJO__server__SSH_PORT=${FORGEJO_SSH_PORT}
+      - FORGEJO__server__SSH_DOMAIN=${FORGEJO_FQDN}
+      - FORGEJO__service__DISABLE_REGISTRATION=true
+    volumes:
+      - ${DOCKER_APPDATA_ROOT}/forgejo/data:/data
+      - /etc/localtime:/etc/localtime:ro
+    ports:
+      - '${FORGEJO_HTTP_PORT}:3000'
+      - '${FORGEJO_SSH_PORT}:22'

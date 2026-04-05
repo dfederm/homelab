@@ -37,6 +37,7 @@ All data lives on a ZFS pool and is bind-mounted into containers. The LXC root f
     ├── dns/               # AdGuard Home
     ├── dozzle/            # Docker log viewer
     ├── files/             # Filestash + Collabora
+    ├── forgejo/           # Forgejo git hosting
     ├── homepage/          # Landing page dashboard
     ├── jellyfin/          # Media streaming
     ├── monitoring/        # Beszel + Uptime Kuma
