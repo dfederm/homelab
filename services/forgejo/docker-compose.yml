@@ -13,6 +13,7 @@ services:
       - FORGEJO__server__SSH_PORT=${FORGEJO_SSH_PORT}
       - FORGEJO__server__SSH_DOMAIN=${FORGEJO_FQDN}
       - FORGEJO__service__DISABLE_REGISTRATION=true
+      - FORGEJO__service__REQUIRE_SIGNIN_VIEW=true
     volumes:
       - ${DOCKER_APPDATA_ROOT}/forgejo/data:/data
       - /etc/localtime:/etc/localtime:ro
