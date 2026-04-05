@@ -49,6 +49,18 @@
         server: my-docker
         container: dozzle
 
+    - Forgejo:
+        icon: forgejo.png
+        href: "{{HOMEPAGE_VAR_FORGEJO_URL}}"
+        description: Git hosting
+        server: my-docker
+        container: forgejo
+
+    - Proxmox:
+        icon: proxmox.png
+        href: "{{HOMEPAGE_VAR_PROXMOX_URL}}"
+        description: Hypervisor
+
 - Monitoring:
     - Beszel:
         icon: beszel.png
