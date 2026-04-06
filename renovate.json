@@ -28,6 +28,16 @@
         "collabora/code"
       ],
       "enabled": false
+    },
+    {
+      "description": "Group Beszel hub and agent updates together",
+      "matchDatasources": [
+        "docker"
+      ],
+      "matchPackageNames": [
+        "/^henrygd\\/beszel/"
+      ],
+      "groupName": "beszel"
     }
   ],
   "docker-compose": {
