@@ -131,6 +131,11 @@ if [ -n "${SMB_HOMELAB_PATH:-}" ]; then
     chown root:admin "$SMB_HOMELAB_PATH/backup"
     chmod 775 "$SMB_HOMELAB_PATH/backup"
 
+    # Appdata dir needs admin write access (remote machines create service dirs via SMB)
+    mkdir -p "$SMB_HOMELAB_PATH/appdata"
+    chown root:admin "$SMB_HOMELAB_PATH/appdata"
+    chmod 775 "$SMB_HOMELAB_PATH/appdata"
+
     SMB_CONF="$SMB_CONF
 
 [homelab]
