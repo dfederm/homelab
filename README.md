@@ -22,6 +22,7 @@ All data lives on a ZFS pool and is bind-mounted into containers. The LXC root f
 ├── renovate.json          # Automated Docker image update config
 ├── scripts/
 │   ├── backup/            # Database and volume backup scripts
+│   ├── bootstrap-remote.sh # Bootstrap a new non-LXC machine (SMB mount + first setup)
 │   ├── deploy.sh          # Deploy changes on this machine (pull + setup)
 │   ├── dispatch.sh        # Webhook handler: pulls code, fans out setup to all machines
 │   ├── lib.sh             # Shared helper functions (sourced by other scripts)
@@ -76,8 +77,10 @@ Modules are standalone, idempotent scripts in `scripts/setup/modules/`. Each han
 | Module | Purpose | Typical machines |
 |--------|---------|-----------------|
 | `configure-amdgpu` | Load AMD GPU kernel driver for hardware transcoding | Proxmox host |
+| `configure-kiosk` | Set up Cage + Chromium kiosk browser pointing at a URL | Alarm panel Pi |
 | `configure-macvlan-bridge` | Persist macvlan bridge so host can reach macvlan containers | Docker LXC |
 | `configure-proxmox-repos` | Switch from paid enterprise repos to free community repos | Proxmox host |
+| `configure-smb-mount` | Mount NAS share via CIFS, persist in fstab | Remote machines |
 | `configure-ssh` | Harden SSH (key-only auth) and deploy authorized keys | All machines |
 | `create-lxcs` | Create/update LXC containers from env var definitions (supports GPU passthrough via `_GPU=1`) | Proxmox host |
 | `create-vms` | Create/update VMs (e.g. Home Assistant) | Proxmox host |
@@ -142,6 +145,30 @@ VMs follow the same prefix-based pattern as LXCs:
 
 Unlike LXCs, VMs do **not** cascade — they manage their own OS internally. The `_IP` variable is informational (for documentation and other configs) and is not passed to `qm`.
 
+### Adding a Remote Machine
+
+Machines outside Proxmox (e.g. a Raspberry Pi) can't use ZFS bind mounts — they access the repo and config via an SMB mount from the NAS. The `bootstrap-remote.sh` script handles the chicken-and-egg problem: the machine needs the NAS mount to access the repo, but the mount module is in the repo.
+
+**First-time setup:**
+
+1. Create a `<hostname>.env` in the config directory on the NAS (see `.env.template`)
+2. Include `configure-smb-mount` in `HOMELAB_SETUP_MODULES` so the mount persists across reboots
+3. Copy `bootstrap-remote.sh` to the machine and run it:
+   ```bash
+   scp scripts/bootstrap-remote.sh root@<ip>:/root/
+   ssh root@<ip>
+
+   SMB_SHARE="//nas-ip/homelab" \
+   SMB_MOUNT_POINT="/mnt/homelab" \
+   SMB_USERNAME="user" \
+   SMB_PASSWORD="pass" \
+   bash /root/bootstrap-remote.sh
+   ```
+4. The script mounts the NAS share, links `/etc/homelab.env`, and runs `setup.sh`
+5. Add the machine to `HOMELAB_DEPLOY_TARGETS` in the webhook host's env file so future pushes deploy automatically
+
+After bootstrapping, the machine is fully managed — `dispatch.sh` will SSH into it and run `setup.sh` on every push to `main`, just like the Proxmox host and LXCs.
+
 ### SSH Access
 
 The `configure-ssh` module hardens SSH on every machine (Proxmox host and all LXCs):
@@ -184,9 +211,11 @@ MAX_UID=1003
 MAX_GROUPS="kids,family"
 ```
 
-Each prefix requires `_GID` (groups) or `_UID` + `_GROUPS` (users). Names are derived by lowercasing the prefix. A primary group matching the username and UID is created automatically for each user.
+Each prefix requires `_GID` (groups) or `_UID` + `_GROUPS` (users). Names are derived by lowercasing the prefix. A primary group matching the username and UID is created automatically for each user. User prefixes must not collide with existing `HOMELAB_*` variable names (e.g. don't use `HOMELAB` as a prefix — it would overwrite `HOMELAB_GROUPS`).
 
 To add a user: add their prefix to `HOMELAB_USERS` in `common.env`, define `_UID` and `_GROUPS`, then re-run `setup.sh` on each machine.
+
+**Service account:** A dedicated service account (e.g. `svc`) in the `admin` group exists for infrastructure tasks like SMB mounts from remote machines. This avoids tying infrastructure to a personal account — credential rotation and audit trails stay clean. Remote machines use this account to mount the NAS share and access the repo, config, and appdata.
 
 ### File Sharing & Permissions
 
@@ -251,7 +280,8 @@ Convention:
   │   ├── authorized_keys   # SSH public keys (shared by all machines)
   │   ├── olympus.env       # Proxmox host
   │   ├── apollo.env        # Docker LXC
-  │   └── atlas.env         # NAS LXC
+  │   ├── atlas.env         # NAS LXC
+  │   └── argus.env         # Alarm panel Pi
   └── repo/                # This git repo
 ```
 
