@@ -7,24 +7,8 @@ services:
       - "${BESZEL_WEB_PORT}:8090"
     volumes:
       - ${DOCKER_APPDATA_ROOT}/beszel:/beszel_data
-      - beszel-socket:/beszel_socket
     environment:
       - TZ=${TZ}
-
-  beszel-agent:
-    container_name: beszel-agent
-    image: henrygd/beszel-agent:0.18.7@sha256:8874e2c53f9de5e063a6a80d6b617e20fa593ac5dc4eb4c6ce1f912f510f38f8
-    restart: unless-stopped
-    network_mode: host
-    volumes:
-      - beszel-socket:/beszel_socket
-      - ${DOCKER_APPDATA_ROOT}/beszel-agent:/var/lib/beszel-agent
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    environment:
-      - LISTEN=/beszel_socket/beszel.sock
-      # KEY is set after first hub setup — copy the public key from the hub UI when adding a system.
-      # Host/IP in the hub UI should be /beszel_socket/beszel.sock (socket mode, not TCP).
-      - KEY=${BESZEL_AGENT_KEY}
 
   uptime-kuma:
     container_name: uptime-kuma
@@ -47,6 +31,3 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
-
-volumes:
-  beszel-socket:

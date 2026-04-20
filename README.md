@@ -41,7 +41,8 @@ All data lives on a ZFS pool and is bind-mounted into containers. The LXC root f
     ├── forgejo/           # Forgejo git hosting
     ├── homepage/          # Landing page dashboard
     ├── jellyfin/          # Media streaming
-    ├── monitoring/        # Beszel + Uptime Kuma
+    ├── monitoring/        # Beszel hub + Uptime Kuma
+    ├── monitoring-agent/  # Beszel agent (runs on all hosts)
     ├── photos/            # Immich
     ├── reverse-proxy/     # Caddy
     ├── webhook/           # CI/CD webhook receiver

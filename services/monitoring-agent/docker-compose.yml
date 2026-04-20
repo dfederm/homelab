@@ -1,0 +1,18 @@
+services:
+  beszel-agent:
+    container_name: beszel-agent
+    image: henrygd/beszel-agent:0.18.7@sha256:8874e2c53f9de5e063a6a80d6b617e20fa593ac5dc4eb4c6ce1f912f510f38f8
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - beszel-agent-data:/var/lib/beszel-agent
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - TZ=${TZ}
+      - PORT=${BESZEL_AGENT_PORT}
+      # KEY must be set before deploying — copy the public key from the hub UI when adding a system.
+      # Host/IP in the hub UI should be <machine-ip>:<port> (TCP mode).
+      - KEY=${BESZEL_AGENT_KEY}
+
+volumes:
+  beszel-agent-data:
