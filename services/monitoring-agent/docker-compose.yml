@@ -9,9 +9,9 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
       - TZ=${TZ}
-      - PORT=${BESZEL_AGENT_PORT}
-      # KEY must be set before deploying — copy the public key from the hub UI when adding a system.
-      # Host/IP in the hub UI should be <machine-ip>:<port> (TCP mode).
+      - LISTEN=${BESZEL_AGENT_PORT}
+      # KEY is the hub's public SSH key (shared by all agents).
+      # When adding a system in the hub UI, set Host/IP to <machine-ip>:<port>.
       - KEY=${BESZEL_AGENT_KEY}
 
 volumes:
