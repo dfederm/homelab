@@ -136,6 +136,14 @@ if [ -n "${SMB_HOMELAB_PATH:-}" ]; then
     chown root:admin "$SMB_HOMELAB_PATH/appdata"
     chmod 775 "$SMB_HOMELAB_PATH/appdata"
 
+    # Repo dir needs admin read access (remote machines, e.g. argus, source setup.sh
+    # from the SMB-mounted repo via the svc service account, which is in the admin group).
+    # Use capital X so non-executable files don't gain spurious execute bits — git tracks file modes.
+    if [ -d "$SMB_HOMELAB_PATH/repo" ]; then
+        chown -R root:admin "$SMB_HOMELAB_PATH/repo"
+        chmod -R u=rwX,g=rwX,o=rX "$SMB_HOMELAB_PATH/repo"
+    fi
+
     SMB_CONF="$SMB_CONF
 
 [homelab]
