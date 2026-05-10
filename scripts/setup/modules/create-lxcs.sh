@@ -16,6 +16,8 @@
 #
 # Optional env vars per prefix:
 #   _GPU (set to 1 to pass through /dev/dri for hardware transcoding)
+#   _USB_DEVICES (space-separated host device paths to pass through, typically
+#                 by-id symlinks, e.g. /dev/serial/by-id/usb-Zooz_800_Z-Wave_Stick_...-if00)
 #
 # Global env vars: NETWORK_ROUTER_IP, NETWORK_PREFIX, DNS_IP
 
@@ -72,6 +74,70 @@ configure_gpu_passthrough() {
 
     if [ "$changed" = true ]; then
         echo "  GPU passthrough configured"
+        return 0
+    fi
+    return 1
+}
+
+# Add USB device passthrough entries to the LXC config from _USB_DEVICES.
+# _USB_DEVICES is a space-separated list of host device paths, typically by-id
+# symlinks (e.g. /dev/serial/by-id/usb-Zooz_800_...-if00). Each device's
+# underlying real path is bound at the same name, and a cgroup allow is added
+# for the device's major number (detected via stat) — so this works for USB ACM
+# (Z-Wave, Zigbee CC), USB serial (FTDI, CP210x), and other character device
+# classes uniformly. /dev/serial is bound as a directory so by-id symlinks
+# resolve inside the container.
+# Returns 0 if config was changed, 1 if already configured or skipped.
+configure_usb_passthrough() {
+    local vmid="$1"
+    local prefix="$2"
+    local devices_var="${prefix}_USB_DEVICES"
+    local devices="${!devices_var:-}"
+
+    [ -z "$devices" ] && return 1
+
+    local conf="/etc/pve/lxc/${vmid}.conf"
+    local changed=false
+
+    if ! grep -q "lxc.mount.entry: /dev/serial " "$conf"; then
+        echo "lxc.mount.entry: /dev/serial dev/serial none bind,optional,create=dir" >> "$conf"
+        changed=true
+    fi
+
+    for device in $devices; do
+        if [ ! -e "$device" ]; then
+            echo "  WARNING: ${prefix}_USB_DEVICES references missing $device — skipping"
+            continue
+        fi
+        local real
+        real=$(readlink -f "$device")
+        if [ -z "$real" ]; then
+            echo "  WARNING: ${prefix}_USB_DEVICES could not resolve $device — skipping"
+            continue
+        fi
+
+        # cgroup allow for this device's major number (detected dynamically so
+        # USB ACM (166), USB serial (188), and others work without code change).
+        local major_hex
+        major_hex=$(stat -c '%t' "$real" 2>/dev/null)
+        if [ -n "$major_hex" ]; then
+            local major=$((16#$major_hex))
+            if ! grep -q "lxc.cgroup2.devices.allow: c $major:" "$conf"; then
+                echo "lxc.cgroup2.devices.allow: c $major:* rwm" >> "$conf"
+                changed=true
+            fi
+        fi
+
+        if ! grep -qF "lxc.mount.entry: $real " "$conf"; then
+            local realname
+            realname=$(basename "$real")
+            echo "lxc.mount.entry: $real dev/$realname none bind,optional,create=file" >> "$conf"
+            changed=true
+        fi
+    done
+
+    if [ "$changed" = true ]; then
+        echo "  USB passthrough configured: $devices"
         return 0
     fi
     return 1
@@ -163,6 +229,11 @@ create_or_update_lxc() {
             needs_restart=true
         fi
 
+        # USB passthrough — apply before restart
+        if configure_usb_passthrough "$vmid" "$label"; then
+            needs_restart=true
+        fi
+
         if [ "$needs_restart" = true ] && [ "$(pct status "$vmid" | awk '{print $2}')" = "running" ]; then
             echo "Restarting LXC..."
             pct reboot "$vmid"
@@ -180,6 +251,9 @@ create_or_update_lxc() {
 
         # GPU passthrough — entries applied before first start
         configure_gpu_passthrough "$vmid" "$label" || true
+
+        # USB passthrough — entries applied before first start
+        configure_usb_passthrough "$vmid" "$label" || true
     fi
 
     # Ensure running
