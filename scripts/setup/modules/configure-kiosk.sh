@@ -18,7 +18,7 @@ validate_env KIOSK_URL KIOSK_USER
 echo "Configuring kiosk..."
 
 # Install packages (idempotent — apt-get skips already installed)
-apt-get install -y -qq cage chromium-browser > /dev/null
+apt-get install -y -qq cage chromium > /dev/null
 
 # Create kiosk user if it doesn't exist
 if ! id "$KIOSK_USER" &>/dev/null; then
@@ -53,7 +53,7 @@ Description=Kiosk Browser
 After=graphical-session.target
 
 [Service]
-ExecStart=/usr/bin/cage --hide-cursor -- chromium-browser --kiosk --noerrdialogs --disable-infobars --autoplay-policy=no-user-gesture-required --disable-session-crashed-bubble ${KIOSK_URL}
+ExecStart=/usr/bin/cage --hide-cursor -- chromium --kiosk --noerrdialogs --disable-infobars --autoplay-policy=no-user-gesture-required --disable-session-crashed-bubble ${KIOSK_URL}
 Restart=always
 RestartSec=5
 
