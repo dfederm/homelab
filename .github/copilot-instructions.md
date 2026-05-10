@@ -94,7 +94,7 @@ When writing or modifying setup modules, use these established patterns:
 - **Simple and readable** — Prefer clear bash over clever one-liners. Comment only when the "why" isn't obvious.
 - **No secrets in the repo** — This repo is public. All sensitive values go in env files.
 - **No personal information in the repo** — This repo is designed to be generic and reusable by anyone. Never hardcode IPs, hostnames, usernames, domains, paths, or any setup-specific values into scripts, compose files, or documentation. All such values must be parameterized via env vars. You may prompt the user for personal/setup-specific information to investigate issues, validate configurations, or provide guidance. You may also store such information in memory (via `store_memory`) for future interactions with the same user. But that information must never be committed to the repo.
-- **Don't commit without review** — Leave changes unstaged for the user to review. Never auto-commit.
+- **Don't commit without review, don't push without explicit approval** — Leave changes unstaged for the user to review. Never auto-commit. **Push may trigger immediate deployment** if the user has configured a deploy webhook (typical homelab pattern: push → webhook → fetch+reset shared repo → SSH to every `HOMELAB_DEPLOY_TARGETS` machine and run `setup.sh`). The user may want to stack multiple commits and push as a batch to avoid deploy churn. Always wait for explicit "push" / "deploy" / "go ahead" from the user before `git push`.
 - **Surgical changes** — When modifying existing files, change only what's needed. Don't reformat or restructure unrelated code.
 
 ## Testing Changes
