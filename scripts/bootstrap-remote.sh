@@ -46,9 +46,9 @@ else
 fi
 
 # Locate the repo and env file on the NAS
-# Convention: <mount>/homelab/repo and <mount>/homelab/config/<hostname>.env
-REPO_DIR="$SMB_MOUNT_POINT/homelab/repo"
-CONFIG_DIR="$SMB_MOUNT_POINT/homelab/config"
+# Convention: <mount>/repo and <mount>/config/<hostname>.env
+REPO_DIR="$SMB_MOUNT_POINT/repo"
+CONFIG_DIR="$SMB_MOUNT_POINT/config"
 ENV_FILE="$CONFIG_DIR/${MACHINE_HOSTNAME}.env"
 
 if [ ! -d "$REPO_DIR" ]; then
