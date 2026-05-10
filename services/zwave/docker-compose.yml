@@ -1,7 +1,7 @@
 services:
   zwave-js-ui:
     container_name: zwave-js-ui
-    image: zwavejs/zwave-js-ui:11.14.0@sha256:d8d9fec2d5c03cb073f31469c11fd1728d93057ebee7b59d5b3995e61aa29791
+    image: zwavejs/zwave-js-ui:11.17.0@sha256:79827886d44929105b625b07ce9870e739502d8b421bff5b11a4c17f811fb577
     restart: always
     tty: true
     stop_signal: SIGINT
