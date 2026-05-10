@@ -36,7 +36,12 @@ fi
 mkdir -p "$SMB_MOUNT_POINT"
 
 # Add/update fstab entry
-FSTAB_ENTRY="${SMB_SHARE} ${SMB_MOUNT_POINT} cifs credentials=${SMB_CREDENTIALS_FILE},iocharset=utf8,_netdev,nofail 0 0"
+# mfsymlinks: client-side symlink emulation (regular file + magic content) so
+# remote machines can create the .env symlinks that run-service.sh relies on
+# (reverse-proxy uses env_file: .env explicitly; other services rely on it for
+# snap-Docker compatibility legacy). CIFS otherwise rejects symlink() with EIO
+# unless the server returns NFS reparse points, which Samba does not by default.
+FSTAB_ENTRY="${SMB_SHARE} ${SMB_MOUNT_POINT} cifs credentials=${SMB_CREDENTIALS_FILE},iocharset=utf8,mfsymlinks,_netdev,nofail 0 0"
 if grep -qF "$SMB_SHARE" /etc/fstab; then
     # Replace existing entry for this share (mount point or options may have changed)
     sed -i "\|${SMB_SHARE}|c\\${FSTAB_ENTRY}" /etc/fstab
