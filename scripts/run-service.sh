@@ -36,6 +36,10 @@ echo "Deploying: $SERVICE"
 
 cd "$SERVICEPATH"
 
+# Create local .env pointing to the resolved real path.
+# Resolving the symlink avoids snap Docker filesystem restrictions.
+ln -sf "$ENV_FILE" "$SERVICEPATH/.env"
+
 # Build env-file args (common first, machine-specific overrides)
 COMMON_ENV="$CONFIG_DIR/common.env"
 ENV_ARGS=()
