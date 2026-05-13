@@ -78,7 +78,7 @@ Modules are standalone, idempotent scripts in `scripts/setup/modules/`. Each han
 | Module | Purpose | Typical machines |
 |--------|---------|-----------------|
 | `configure-amdgpu` | Load AMD GPU kernel driver for hardware transcoding | Proxmox host |
-| `configure-kiosk` | Set up Cage + Chromium kiosk browser pointing at a URL | Alarm panel Pi |
+| `configure-pi-kiosk` | Set up Cage + Chromium kiosk browser pointing at a URL (Raspberry Pi specific) | Alarm panel Pi |
 | `configure-macvlan-bridge` | Persist macvlan bridge so host can reach macvlan containers | Docker LXC |
 | `configure-proxmox-repos` | Switch from paid enterprise repos to free community repos | Proxmox host |
 | `configure-smb-mount` | Mount NAS share via CIFS, persist in fstab | Remote machines |
