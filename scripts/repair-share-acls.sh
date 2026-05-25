@@ -97,21 +97,41 @@ fix_owner() {
     fi
 }
 
+# Convert an octal digit (0-7) to its rwx representation (used by chmod symbolic mode).
+num_to_perm() {
+    local n="$1" p=""
+    (( n & 4 )) && p+="r"
+    (( n & 2 )) && p+="w"
+    (( n & 1 )) && p+="x"
+    echo "$p"
+}
+
 # Check / fix mode of a single path. Uses different modes for dirs vs files.
+# Only the user (1st) and other (3rd) octal digits are enforced. The group/mask
+# digit is left to setfacl: when an extended ACL is present, `stat -c '%a'`
+# reports the mask in the middle digit, not group::, so trying to force it
+# would silently demote the ACL mask and cap effective group permissions.
 fix_mode() {
     local path="$1" want_dir_mode="$2" want_file_mode="$3"
-    local want_mode cur_mode
+    local want_mode
     if [ -d "$path" ]; then
         want_mode="$want_dir_mode"
     else
         want_mode="$want_file_mode"
     fi
+    local cur_mode
     cur_mode=$(stat -c '%a' "$path")
-    if [ "$cur_mode" != "$want_mode" ]; then
-        echo "  mode:  $path  ($cur_mode -> $want_mode)"
+    # Normalise to 3 digits (stat may emit 4 with setuid/sticky)
+    cur_mode="${cur_mode: -3}"
+
+    local want_u="${want_mode:0:1}" want_o="${want_mode:2:1}"
+    local cur_u="${cur_mode:0:1}"  cur_o="${cur_mode:2:1}"
+
+    if [ "$cur_u" != "$want_u" ] || [ "$cur_o" != "$want_o" ]; then
+        echo "  mode:  $path  (u=$cur_u o=$cur_o -> u=$want_u o=$want_o)"
         N_MODE_FIX+=1
         if [ "$APPLY" -eq 1 ]; then
-            chmod "$want_mode" "$path"
+            chmod "u=$(num_to_perm "$want_u"),o=$(num_to_perm "$want_o")" "$path"
         fi
     fi
 }
