@@ -19,6 +19,11 @@
 #   - Kid personal dirs: adults rwx (parental oversight)
 #   - adults/ dir: adults group rwx
 #   - family/ dir: family group rwx
+#
+# NOTE: This module only sets ACLs on the top-level dirs + default ACLs that
+# propagate to NEW content. To retroactively repair existing content (e.g.
+# after a migration from another NAS), use scripts/repair-share-acls.sh.
+# If you change the permission rules below, mirror them in that script.
 
 set -euo pipefail
 
