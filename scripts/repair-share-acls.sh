@@ -106,32 +106,27 @@ num_to_perm() {
     echo "$p"
 }
 
-# Check / fix mode of a single path. Uses different modes for dirs vs files.
-# Only the user (1st) and other (3rd) octal digits are enforced. The group/mask
-# digit is left to setfacl: when an extended ACL is present, `stat -c '%a'`
-# reports the mask in the middle digit, not group::, so trying to force it
-# would silently demote the ACL mask and cap effective group permissions.
-fix_mode() {
-    local path="$1" want_dir_mode="$2" want_file_mode="$3"
-    local want_mode
-    if [ -d "$path" ]; then
-        want_mode="$want_dir_mode"
-    else
-        want_mode="$want_file_mode"
-    fi
-    local cur_mode
+# Check / fix the "other" mode bits of a path. We do NOT enforce user or
+# group/mask bits:
+#   - User bits are preserved so legitimate executables (Linux binaries,
+#     emulator .exe files, personal scripts) keep their exec bit.
+#   - The group/mask digit reflects the ACL mask when extended ACLs are
+#     present, which is managed by setfacl, not by us.
+# The "other" bits are enforced because world-readable/writable files in
+# this share would leak data across user accounts.
+fix_other_bits() {
+    local path="$1" want_o="$2"
+    local cur_mode cur_o
     cur_mode=$(stat -c '%a' "$path")
     # Normalise to 3 digits (stat may emit 4 with setuid/sticky)
     cur_mode="${cur_mode: -3}"
+    cur_o="${cur_mode:2:1}"
 
-    local want_u="${want_mode:0:1}" want_o="${want_mode:2:1}"
-    local cur_u="${cur_mode:0:1}"  cur_o="${cur_mode:2:1}"
-
-    if [ "$cur_u" != "$want_u" ] || [ "$cur_o" != "$want_o" ]; then
-        echo "  mode:  $path  (u=$cur_u o=$cur_o -> u=$want_u o=$want_o)"
+    if [ "$cur_o" != "$want_o" ]; then
+        echo "  mode:  $path  (o=$cur_o -> o=$want_o)"
         N_MODE_FIX+=1
         if [ "$APPLY" -eq 1 ]; then
-            chmod "u=$(num_to_perm "$want_u"),o=$(num_to_perm "$want_o")" "$path"
+            chmod "o=$(num_to_perm "$want_o")" "$path"
         fi
     fi
 }
@@ -179,29 +174,30 @@ fix_acl() {
     fi
 }
 
-# Walk a subtree applying owner / mode / acl rules.
+# Walk a subtree applying owner / other-mode / acl rules.
 #   $1 root path
 #   $2 desired owner (user)
 #   $3 desired group
-#   $4 dir mode (e.g. 770)
-#   $5 file mode (e.g. 660)
-#   $6 acl spec (comma-separated, no defaults — defaults derived for dirs)
+#   $4 acl spec (comma-separated, no defaults — defaults derived for dirs)
+#
+# "Other" bits are always forced to "---" (privacy). User and group/mask bits
+# are intentionally not enforced — see fix_other_bits.
 repair_subtree() {
-    local root="$1" owner="$2" group="$3" dmode="$4" fmode="$5" acl="$6"
+    local root="$1" owner="$2" group="$3" acl="$4"
 
     if [ ! -e "$root" ]; then
         echo "  (skip — does not exist: $root)"
         return
     fi
 
-    echo "--- $root  (owner=$owner:$group dirs=$dmode files=$fmode acl=$acl) ---"
+    echo "--- $root  (owner=$owner:$group other=--- acl=$acl) ---"
 
     # -print0 / read -d '' to handle weird filenames safely
     while IFS= read -r -d '' path; do
         local before_owner=$N_OWNER_FIX before_mode=$N_MODE_FIX before_acl=$N_ACL_FIX
-        fix_owner "$path" "$owner" "$group"
-        fix_mode  "$path" "$dmode" "$fmode"
-        fix_acl   "$path" "$acl"
+        fix_owner       "$path" "$owner" "$group"
+        fix_other_bits  "$path" 0
+        fix_acl         "$path" "$acl"
         if [ "$before_owner" -eq "$N_OWNER_FIX" ] && \
            [ "$before_mode"  -eq "$N_MODE_FIX" ]  && \
            [ "$before_acl"   -eq "$N_ACL_FIX" ]; then
@@ -213,10 +209,10 @@ repair_subtree() {
 # Build the list of (path, rules) tuples to process, matching the logic in
 # set-share-permissions.sh.
 
-declare -a JOBS  # each entry: "path|owner|group|dmode|fmode|acl"
+declare -a JOBS  # each entry: "path|owner|group|acl"
 
 add_job() {
-    JOBS+=("$1|$2|$3|$4|$5|$6")
+    JOBS+=("$1|$2|$3|$4")
 }
 
 # Per-user personal dirs
@@ -228,17 +224,17 @@ for prefix in $HOMELAB_USERS; do
     dir="$SHARE_ROOT/$name"
 
     if echo "$groups" | grep -qw "adults"; then
-        # Adult personal dir: owner rwx, admin rwx, other adults r-x
-        add_job "$dir" "$name" "$name" 770 660 "group:admin:rwx,group:adults:r-x"
+        # Adult personal dir: owner full, admin rwx, other adults r-x
+        add_job "$dir" "$name" "$name" "group:admin:rwx,group:adults:r-x"
     else
-        # Kid personal dir: owner rwx, admin rwx, adults rwx
-        add_job "$dir" "$name" "$name" 770 660 "group:admin:rwx,group:adults:rwx"
+        # Kid personal dir: owner full, admin rwx, adults rwx
+        add_job "$dir" "$name" "$name" "group:admin:rwx,group:adults:rwx"
     fi
 done
 
 # Shared folders
-add_job "$SHARE_ROOT/adults" root adults 770 660 "group:admin:rwx,group:adults:rwx"
-add_job "$SHARE_ROOT/family" root family 770 660 "group:admin:rwx,group:family:rwx"
+add_job "$SHARE_ROOT/adults" root adults "group:admin:rwx,group:adults:rwx"
+add_job "$SHARE_ROOT/family" root family "group:admin:rwx,group:family:rwx"
 
 # Filter by TARGET if given
 if [ -n "$TARGET" ]; then
@@ -268,8 +264,8 @@ fi
 
 # Execute
 for job in "${JOBS[@]}"; do
-    IFS='|' read -r path owner group dmode fmode acl <<< "$job"
-    repair_subtree "$path" "$owner" "$group" "$dmode" "$fmode" "$acl"
+    IFS='|' read -r path owner group acl <<< "$job"
+    repair_subtree "$path" "$owner" "$group" "$acl"
 done
 
 echo
