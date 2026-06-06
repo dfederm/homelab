@@ -1,4 +1,4 @@
-FROM rclone/rclone:1.74.1@sha256:eb8788b795f0009324e9572b0e2acb9b56885327c2746b07d67a9d3b893a6602
+FROM rclone/rclone:1.74.3@sha256:623378ad0ff3ebd5cebf77720843c0e02edfe46e2d5b5ac6bed54c6371780dfb
 
 COPY --chmod=755 backup.sh /
 COPY --chmod=755 start.sh /
