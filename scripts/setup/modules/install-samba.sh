@@ -107,13 +107,21 @@ fi
 
 # Optional: Media share (admin only — upload/manage, not consume)
 if [ -n "${SMB_MEDIA_PATH:-}" ]; then
-    chmod 755 "$SMB_MEDIA_PATH"
+    # Top-level only: admin group needs write so members of the admin group
+    # can manage the library via SMB. Default ACL seeds inheritance for newly
+    # created content at this level.
+    chown root:admin "$SMB_MEDIA_PATH"
+    chmod 770 "$SMB_MEDIA_PATH"
+    setfacl -m g:admin:rwx "$SMB_MEDIA_PATH"
+    setfacl -d -m g:admin:rwx "$SMB_MEDIA_PATH"
     SMB_CONF="$SMB_CONF
 
 [media]
    path = $SMB_MEDIA_PATH
    valid users = $admins
-   read only = no"
+   read only = no
+   create mask = 0770
+   directory mask = 0770"
 fi
 
 # Optional: Homelab share (admin only)

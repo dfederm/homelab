@@ -14,18 +14,21 @@
 # in the JOBS list below.
 #
 # Usage:
-#   bash scripts/repair-share-acls.sh [--apply] [subdir]
+#   bash scripts/repair-share-acls.sh [--apply] [target]
 #
 #   --apply   Actually change ownership / modes / ACLs. Without this flag the
 #             script only reports what would change (dry run).
-#   subdir    Optional. Relative path under SHARE_ROOT to limit the repair to
-#             (e.g. "adults", "adults/Documents", "alice"). Defaults to all
-#             top-level dirs the setup module manages.
+#   target    Optional. Path to limit the repair to. May be:
+#               - relative to SHARE_ROOT (e.g. "adults", "adults/Documents", "alice")
+#               - an absolute path under any managed root (e.g. "/mnt/media/Movies")
+#             Defaults to all top-level dirs the setup module manages.
 #
 # Examples:
-#   bash scripts/repair-share-acls.sh                       # dry-run, full share
-#   bash scripts/repair-share-acls.sh adults/Documents      # dry-run, one subtree
+#   bash scripts/repair-share-acls.sh                       # dry-run, all managed roots
+#   bash scripts/repair-share-acls.sh adults/Documents      # dry-run, federshare subtree
 #   bash scripts/repair-share-acls.sh --apply adults        # apply to adults/
+#   bash scripts/repair-share-acls.sh --apply /mnt/media    # apply to media share
+#   bash scripts/repair-share-acls.sh --apply /mnt/homelab/config    # apply to homelab config dir
 #
 # Run this inside the NAS LXC (where SHARE_ROOT is mounted and the users/groups
 # exist), as root.
@@ -50,7 +53,9 @@ for arg in "$@"; do
     case "$arg" in
         --apply) APPLY=1 ;;
         -h|--help)
-            sed -n '2,31p' "$0" | sed 's/^# \{0,1\}//'
+            # Print the leading comment block (everything from line 2 up to but
+            # not including the first non-`#` / non-blank line).
+            awk 'NR>1 && /^[^#]/ && !/^$/ {exit} NR>1 {sub(/^# ?/, ""); print}' "$0"
             exit 0
             ;;
         --*)
@@ -133,8 +138,10 @@ fix_other_bits() {
 
 # Check / fix ACLs. acl_spec is a comma-separated setfacl spec (no -d).
 # Dirs additionally get the same spec as default ACLs.
+# Empty acl_spec means "no ACLs to enforce" — skip the check entirely.
 fix_acl() {
     local path="$1" acl_spec="$2"
+    [ -z "$acl_spec" ] && return
     local cur missing=0
     # Strip "#effective:..." annotations and trailing whitespace so entries
     # compare cleanly regardless of mask state.
@@ -178,25 +185,28 @@ fix_acl() {
 #   $1 root path
 #   $2 desired owner (user)
 #   $3 desired group
-#   $4 acl spec (comma-separated, no defaults — defaults derived for dirs)
+#   $4 acl spec (comma-separated, no defaults — defaults derived for dirs;
+#                empty string means "no extended ACLs to enforce")
+#   $5 desired "other" mode digit (0-7); typically 0 for private shares or
+#      5 (r-x) for shares whose content is readable by non-admin system users
 #
-# "Other" bits are always forced to "---" (privacy). User and group/mask bits
-# are intentionally not enforced — see fix_other_bits.
+# Only the "other" mode digit is enforced. User and group/mask bits are
+# intentionally not enforced — see fix_other_bits.
 repair_subtree() {
-    local root="$1" owner="$2" group="$3" acl="$4"
+    local root="$1" owner="$2" group="$3" acl="$4" other="$5"
 
     if [ ! -e "$root" ]; then
         echo "  (skip — does not exist: $root)"
         return
     fi
 
-    echo "--- $root  (owner=$owner:$group other=--- acl=$acl) ---"
+    echo "--- $root  (owner=$owner:$group other=$(num_to_perm "$other") acl=$acl) ---"
 
     # -print0 / read -d '' to handle weird filenames safely
     while IFS= read -r -d '' path; do
         local before_owner=$N_OWNER_FIX before_mode=$N_MODE_FIX before_acl=$N_ACL_FIX
         fix_owner       "$path" "$owner" "$group"
-        fix_other_bits  "$path" 0
+        fix_other_bits  "$path" "$other"
         fix_acl         "$path" "$acl"
         if [ "$before_owner" -eq "$N_OWNER_FIX" ] && \
            [ "$before_mode"  -eq "$N_MODE_FIX" ]  && \
@@ -207,12 +217,16 @@ repair_subtree() {
 }
 
 # Build the list of (path, rules) tuples to process, matching the logic in
-# set-share-permissions.sh.
+# set-share-permissions.sh and install-samba.sh.
 
-declare -a JOBS  # each entry: "path|owner|group|acl"
+declare -a JOBS  # each entry: "path|owner|group|acl|other"
+                 # acl   — comma-separated setfacl spec; empty string means
+                 #         "no extended ACLs to enforce — only owner + other-bits"
+                 # other — desired "other" mode digit (0-7); 0 for private,
+                 #         5 (r-x) for shares with non-admin readers
 
 add_job() {
-    JOBS+=("$1|$2|$3|$4")
+    JOBS+=("$1|$2|$3|$4|$5")
 }
 
 # Per-user personal dirs
@@ -225,21 +239,44 @@ for prefix in $HOMELAB_USERS; do
 
     if echo "$groups" | grep -qw "adults"; then
         # Adult personal dir: owner full, admin rwx, other adults r-x
-        add_job "$dir" "$name" "$name" "group:admin:rwx,group:adults:r-x"
+        add_job "$dir" "$name" "$name" "group:admin:rwx,group:adults:r-x" 0
     else
         # Kid personal dir: owner full, admin rwx, adults rwx
-        add_job "$dir" "$name" "$name" "group:admin:rwx,group:adults:rwx"
+        add_job "$dir" "$name" "$name" "group:admin:rwx,group:adults:rwx" 0
     fi
 done
 
 # Shared folders
-add_job "$SHARE_ROOT/adults" root adults "group:admin:rwx,group:adults:rwx"
-add_job "$SHARE_ROOT/family" root family "group:admin:rwx,group:family:rwx"
+add_job "$SHARE_ROOT/adults" root adults "group:admin:rwx,group:adults:rwx" 0
+add_job "$SHARE_ROOT/family" root family "group:admin:rwx,group:family:rwx" 0
+
+# Optional media share (admin-only). Same ACL idiom as the federshare jobs.
+# `mask::rwx` is included explicitly so a file whose group mode bits drifted
+# low (which would otherwise collapse the ACL mask and silently neuter the
+# named-group entry) is restored to full admin-group writability.
+if [ -n "${SMB_MEDIA_PATH:-}" ]; then
+    add_job "$SMB_MEDIA_PATH" root admin "group:admin:rwx,mask::rwx" 0
+fi
+
+# Optional homelab share (admin-only). Only the subdirs that install-samba.sh
+# recursively manages are included — backup/ and appdata/ are intentionally
+# scoped at top-level-only in the setup module because their contents are owned
+# by their respective writers (Home Assistant backups, Docker services). The
+# other-mode bits are 5 (r-x) to mirror the setup module's chmod 775 /
+# u=rwX,g=rwX,o=rX.
+if [ -n "${SMB_HOMELAB_PATH:-}" ]; then
+    add_job "$SMB_HOMELAB_PATH/config" root admin "group:admin:rwx,mask::rwx" 5
+    add_job "$SMB_HOMELAB_PATH/repo"   root admin "group:admin:rwx,mask::rwx" 5
+fi
 
 # Filter by TARGET if given
 if [ -n "$TARGET" ]; then
-    abs_target="$SHARE_ROOT/${TARGET#/}"
-    abs_target="${abs_target%/}"
+    if [[ "$TARGET" == /* ]]; then
+        abs_target="${TARGET%/}"
+    else
+        abs_target="$SHARE_ROOT/${TARGET#/}"
+        abs_target="${abs_target%/}"
+    fi
 
     filtered=()
     for job in "${JOBS[@]}"; do
@@ -264,8 +301,8 @@ fi
 
 # Execute
 for job in "${JOBS[@]}"; do
-    IFS='|' read -r path owner group acl <<< "$job"
-    repair_subtree "$path" "$owner" "$group" "$acl"
+    IFS='|' read -r path owner group acl other <<< "$job"
+    repair_subtree "$path" "$owner" "$group" "$acl" "$other"
 done
 
 echo
