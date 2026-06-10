@@ -75,3 +75,10 @@
         description: Service health
         server: my-docker
         container: uptime-kuma
+
+    - Scrutiny:
+        icon: scrutiny.png
+        href: "{{HOMEPAGE_VAR_SCRUTINY_URL}}"
+        description: Drive SMART health
+        server: my-docker
+        container: scrutiny-web

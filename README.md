@@ -29,6 +29,7 @@ All data lives on a ZFS pool and is bind-mounted into containers. The LXC root f
 │   ├── recreate-service.sh # Force-recreate a service container
 │   ├── run-all-services.sh
 │   ├── run-service.sh     # Deploy a single Docker Compose service
+│   ├── storage/           # Host-level storage-health scripts (ZFS scrub/health, SMART alert dispatch)
 │   ├── update.sh          # Update system packages on host and all LXCs
 │   └── setup/
 │       ├── setup.sh       # Main setup runner (see below)
@@ -45,6 +46,7 @@ All data lives on a ZFS pool and is bind-mounted into containers. The LXC root f
     ├── monitoring-agent/  # Beszel agent (runs on all hosts)
     ├── photos/            # Immich
     ├── reverse-proxy/     # Caddy
+    ├── scrutiny/          # Drive SMART health (web UI + InfluxDB)
     ├── webhook/           # CI/CD webhook receiver
     └── zwave/             # Z-Wave JS UI
 ```
@@ -79,10 +81,12 @@ Modules are standalone, idempotent scripts in `scripts/setup/modules/`. Each han
 |--------|---------|-----------------|
 | `configure-amdgpu` | Load AMD GPU kernel driver for hardware transcoding | Proxmox host |
 | `configure-pi-kiosk` | Set up Cage + Chromium kiosk browser pointing at a URL (Raspberry Pi specific) | Alarm panel Pi |
+| `configure-scrutiny-collector` | Install Scrutiny SMART collector (pinned binary) + timer; pushes drive health to the Scrutiny web UI | Proxmox host |
 | `configure-macvlan-bridge` | Persist macvlan bridge so host can reach macvlan containers | Docker LXC |
 | `configure-proxmox-repos` | Switch from paid enterprise repos to free community repos | Proxmox host |
 | `configure-smb-mount` | Mount NAS share via CIFS, persist in fstab | Remote machines |
 | `configure-ssh` | Harden SSH (key-only auth) and deploy authorized keys | All machines |
+| `configure-storage-health` | Schedule monthly ZFS scrubs + daily pool health check + SMART self-tests (smartd), with degradation alerting | Proxmox host |
 | `create-lxcs` | Create/update LXC containers from env var definitions (supports GPU passthrough via `_GPU=1`) | Proxmox host |
 | `create-vms` | Create/update VMs (e.g. Home Assistant) | Proxmox host |
 | `create-users` | Create Linux users/groups with aligned UIDs across machines | Docker LXC, NAS LXC |
@@ -98,10 +102,11 @@ The `create-lxcs` module doesn't just create containers — after creation, it r
 ```
 setup.sh on Proxmox host
   → configure-proxmox-repos, install-tools, configure-amdgpu, configure-ssh
+  → configure-storage-health (ZFS scrub + SMART self-tests + alerting), configure-scrutiny-collector
   → create-lxcs
     → creates Docker LXC (GPU passthrough if _GPU=1), then runs setup.sh inside it
       → create-users, install-tools, configure-ssh, install-docker, configure-macvlan-bridge
-      → deploys HOMELAB_SERVICES (Jellyfin, Immich, Caddy, etc.)
+      → deploys HOMELAB_SERVICES (Jellyfin, Immich, Caddy, Scrutiny, etc.)
     → creates NAS LXC, then runs setup.sh inside it
       → create-users, install-tools, configure-ssh, install-samba, set-share-permissions
   → create-vms (Home Assistant)
@@ -247,6 +252,49 @@ After creating the NAS LXC, set each user's Samba password:
 ```bash
 smbpasswd -a <username>
 ```
+
+## Storage Health
+
+The ZFS pool and physical drives are owned by the **Proxmox host** (bare metal), so
+scrubs and drive SMART tests are host-level concerns, configured by setup modules and
+run via systemd timers:
+
+- **`configure-storage-health`** (Proxmox host):
+  - **Monthly ZFS scrub** of `ZFS_POOL` (first Sunday by default) — `zpool scrub -w`
+    followed by an error check. Monthly is the safe cadence for spinning disks.
+  - **Daily ZFS pool health check** — catches degraded/faulted vdevs and data errors
+    between scrubs.
+  - **SMART self-tests via smartd** on all drives — short daily, long monthly — plus
+    drive-attribute/health monitoring (reallocated/pending sectors, failing self-test,
+    temperature). smartd logs any degradation to syslog/journal. (Long tests are slow on
+    large drives — tens of hours on a multi-TB drive — so the default cadence is monthly,
+    not weekly.)
+
+- **Scrutiny** (web UI + SMART history) is split to fit the architecture:
+  - **`services/scrutiny/`** (Docker host) — the web UI + InfluxDB backend (no disk
+    access needed). LAN-only dashboard (accessed by `DOCKER_HOST_IP:SCRUTINY_WEB_PORT`,
+    not exposed via Caddy), like Beszel / Uptime Kuma / Dozzle.
+  - **`configure-scrutiny-collector`** (Proxmox host) — the collector runs where the
+    physical disks are, as a binary on a timer, and POSTs SMART data to the web UI. It
+    only *reads* SMART data; smartd owns self-test *scheduling*, so the two never
+    double-schedule tests. The collector **version is derived from the `scrutiny` web
+    image tag** in `services/scrutiny/docker-compose.yml` (the single source Renovate
+    bumps) and the downloaded binary is verified against GitHub's published sha256 digest
+    — so a Renovate web-image bump carries the collector automatically, with no second
+    version/checksum to keep in lockstep.
+
+**Detection now, push alerting later.** This delivers the *detection*: a failing scrub or
+degraded pool fails its systemd unit (visible via `systemctl --failed` and the journal),
+smartd logs SMART degradation to syslog, and Scrutiny shows drive health on its dashboard.
+Active **push** notifications (ntfy / Pushover / Gotify / Uptime Kuma) are intentionally
+deferred until the homelab alerting backend is chosen — that work will hook ZFS + SMART +
+Scrutiny into the chosen backend in one place.
+
+**Schedules are opt-out per feature.** Each scheduled task is gated by its schedule env
+var (`ZFS_SCRUB_SCHEDULE`, `ZFS_HEALTH_CHECK_SCHEDULE`, `SMART_SELFTEST_SCHEDULE`,
+`SCRUTINY_COLLECTOR_SCHEDULE`). `.env.template` ships recommended defaults; **clear a value
+(set it empty) to disable that specific feature** — the module then removes the
+corresponding timer. (smartd still runs for monitoring even with self-tests disabled.)
 
 ## Services
 

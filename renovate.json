@@ -38,6 +38,16 @@
         "/^henrygd\\/beszel/"
       ],
       "groupName": "beszel"
+    },
+    {
+      "description": "Scrutiny only supports InfluxDB 2.x — do not bump to 3.x",
+      "matchDatasources": [
+        "docker"
+      ],
+      "matchPackageNames": [
+        "influxdb"
+      ],
+      "allowedVersions": "/^2\\./"
     }
   ],
   "docker-compose": {

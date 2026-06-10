@@ -1,0 +1,47 @@
+services:
+  # Time-series store for Scrutiny's SMART history. Internal only (no published
+  # port) — only scrutiny-web talks to it, over the compose network. Scrutiny-web
+  # auto-provisions the InfluxDB org/bucket/token on first start.
+  scrutiny-influxdb:
+    container_name: scrutiny-influxdb
+    image: influxdb:2.8@sha256:e3e7ee6476007edc0577e9114c78028112e92e48ead3545865d35187cd9a5eda
+    restart: unless-stopped
+    volumes:
+      - ${DOCKER_APPDATA_ROOT}/scrutiny/influxdb:/var/lib/influxdb2
+    environment:
+      - TZ=${TZ}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8086/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  # Scrutiny web UI + API. The SMART collector runs on the Proxmox host (where the
+  # physical disks live) and POSTs here — see scripts/setup/modules/configure-scrutiny-collector.sh.
+  scrutiny-web:
+    container_name: scrutiny-web
+    image: ghcr.io/analogj/scrutiny:v0.9.2-web@sha256:71be54e9960826f356fe290eb196762b2e18001e39f6ee09eeb17fe926acbf2c
+    restart: unless-stopped
+    ports:
+      - "${SCRUTINY_WEB_PORT}:8080"
+    volumes:
+      - ${DOCKER_APPDATA_ROOT}/scrutiny/config:/opt/scrutiny/config
+    environment:
+      - TZ=${TZ}
+      - SCRUTINY_WEB_INFLUXDB_HOST=scrutiny-influxdb
+      - SCRUTINY_WEB_INFLUXDB_PORT=8086
+    depends_on:
+      scrutiny-influxdb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
