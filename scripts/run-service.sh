@@ -32,6 +32,38 @@ if [ ! -f "$SERVICEPATH/docker-compose.yml" ]; then
     exit 1
 fi
 
+# Multi-instance services: when <SERVICE>_INSTANCES is set (space-separated), deploy the
+# same compose once per instance as its own project (e.g. minecraft-creative), layering a
+# per-instance env file (<config_dir>/<service>/<instance>.env) on top of common + machine
+# env. Adding an instance then needs only that env file plus a name in the list.
+SERVICE_UPPER=$(echo "$SERVICE" | tr 'a-z-' 'A-Z_')
+INSTANCES_VAR="${SERVICE_UPPER}_INSTANCES"
+INSTANCES="${!INSTANCES_VAR:-}"
+if [ -n "$INSTANCES" ]; then
+    COMMON_ENV="$CONFIG_DIR/common.env"
+    cd "$SERVICEPATH"
+    export BUILDX_NO_DEFAULT_ATTESTATIONS=1
+    for INSTANCE in $INSTANCES; do
+        echo ""
+        echo "Deploying: $SERVICE ($INSTANCE)"
+        INSTANCE_ENV="$CONFIG_DIR/$SERVICE/$INSTANCE.env"
+        ENV_ARGS=()
+        [ -f "$COMMON_ENV" ] && ENV_ARGS+=(--env-file "$COMMON_ENV")
+        ENV_ARGS+=(--env-file "$ENV_FILE")
+        [ -f "$INSTANCE_ENV" ] && ENV_ARGS+=(--env-file "$INSTANCE_ENV")
+        export "${SERVICE_UPPER}_INSTANCE=$INSTANCE"
+        docker compose -p "$SERVICE-$INSTANCE" "${ENV_ARGS[@]}" pull
+        docker compose -p "$SERVICE-$INSTANCE" "${ENV_ARGS[@]}" up $FORCE --remove-orphans -d
+        # Optional per-instance post-deploy hook (e.g. apply gamerules via the console).
+        # CONFIG_DIR is exported by source_env, so the hook can find per-instance files.
+        if [ -f "$SERVICEPATH/post-up.sh" ]; then
+            bash "$SERVICEPATH/post-up.sh" "$INSTANCE"
+        fi
+    done
+    docker image prune -f
+    exit 0
+fi
+
 echo "Deploying: $SERVICE"
 
 cd "$SERVICEPATH"

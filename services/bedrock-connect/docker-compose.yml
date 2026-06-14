@@ -1,0 +1,21 @@
+services:
+  bedrock-connect:
+    container_name: bedrock-connect
+    image: pugmatt/bedrock-connect:1.67.0@sha256:502c65a2227fd42742d4a5038a2659e7c8278ce477d7562c7155d22f20016ca8
+    restart: unless-stopped
+    environment:
+      - TZ=${TZ}
+      # Show every console the predefined world menu, and lock it down: players
+      # can't add/remove servers, and no third-party "featured" servers are listed.
+      - BC_CUSTOM_SERVERS=/config/custom_servers.json
+      - BC_USER_SERVERS=false
+      - BC_FEATURED_SERVERS=false
+    # Must stay on UDP 19132: consoles reach BedrockConnect via the default Bedrock
+    # port (a featured-server hostname is DNS-redirected to this host in AdGuard).
+    ports:
+      - '19132:19132/udp'
+    # custom_servers.json (the world menu) lives in this NAS directory, mounted
+    # read-only. Mounting the directory (not the file) avoids Docker creating a
+    # phantom directory if the file doesn't exist yet.
+    volumes:
+      - ${BEDROCK_CONNECT_CONFIG}:/config:ro

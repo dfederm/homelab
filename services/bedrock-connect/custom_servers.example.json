@@ -1,0 +1,12 @@
+[
+  {
+    "name": "Creative",
+    "address": "<docker-host-ip>",
+    "port": 19133
+  },
+  {
+    "name": "Survival",
+    "address": "<docker-host-ip>",
+    "port": 19134
+  }
+]

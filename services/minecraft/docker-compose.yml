@@ -1,0 +1,31 @@
+services:
+  # Generic template for one Bedrock world. Deployed once per world by
+  # run-service.sh, which sets MINECRAFT_INSTANCE and layers the per-world env
+  # file (see MINECRAFT_INSTANCES in .env.template). Add a world without editing
+  # this file — just add its name to the list and create its per-world env file.
+  minecraft:
+    container_name: minecraft-${MINECRAFT_INSTANCE}
+    image: itzg/minecraft-bedrock-server:2026.6.0@sha256:2847bb60a884afe54d6731dde32698743c5d794b3f6a9785b80d0fdcd7a7d824
+    restart: unless-stopped
+    # stdin/tty keep the Bedrock console attachable (docker attach / send-command);
+    # this is also how per-world init commands (gamerules) are applied after start.
+    stdin_open: true
+    tty: true
+    environment:
+      - EULA=TRUE
+      - TZ=${TZ}
+      - SERVER_NAME=${MINECRAFT_SERVER_NAME}
+      - LEVEL_NAME=${MINECRAFT_LEVEL_NAME}
+      - GAMEMODE=${MINECRAFT_GAMEMODE}
+      - DIFFICULTY=${MINECRAFT_DIFFICULTY}
+      - ALLOW_CHEATS=${MINECRAFT_ALLOW_CHEATS}
+      - ALLOW_LIST=${MINECRAFT_ALLOW_LIST}
+      - ALLOW_LIST_USERS=${MINECRAFT_ALLOW_LIST_USERS}
+      - OPS=${MINECRAFT_OPS}
+    # Each world publishes its own UDP port on the Docker host. Consoles don't dial
+    # this directly — BedrockConnect transfers them here from its menu — so the port
+    # can differ per world (only BedrockConnect must stay on the fixed 19132).
+    ports:
+      - '${MINECRAFT_PORT}:19132/udp'
+    volumes:
+      - ${DOCKER_APPDATA_ROOT}/minecraft/${MINECRAFT_INSTANCE}:/data

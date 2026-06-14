@@ -36,12 +36,14 @@ All data lives on a ZFS pool and is bind-mounted into containers. The LXC root f
 │       └── modules/       # Idempotent setup modules
 └── services/              # Docker Compose service definitions
     ├── backup/            # Rclone cloud backup
+    ├── bedrock-connect/   # Console server-list menu (BedrockConnect) for Minecraft
     ├── dns/               # AdGuard Home
     ├── dozzle/            # Docker log viewer
     ├── files/             # Filestash + Collabora
     ├── forgejo/           # Forgejo git hosting
     ├── homepage/          # Landing page dashboard
     ├── jellyfin/          # Media streaming
+    ├── minecraft/         # Minecraft Bedrock servers (multi-world)
     ├── monitoring/        # Beszel hub + Uptime Kuma
     ├── monitoring-agent/  # Beszel agent (runs on all hosts)
     ├── photos/            # Immich
@@ -314,6 +316,34 @@ Services are defined per-machine in the env file:
 ```
 HOMELAB_SERVICES=dns,reverse-proxy,jellyfin,photos,files,monitoring,homepage,dozzle
 ```
+
+### Multi-instance services
+
+A service can be deployed as several independent instances from a single compose file.
+When `<SERVICE>_INSTANCES` is set (space-separated) in the env file, `run-service.sh`
+deploys the service's compose once per instance as its own Compose project
+(`<service>-<instance>`), layering a per-instance env file
+(`<config_dir>/<service>/<instance>.env`) on top of `common.env` + the machine env. The
+instance name is exposed to the compose as `<SERVICE>_INSTANCE`. Adding an instance needs
+only a new per-instance env file plus its name in the list — no repo change.
+
+### Minecraft (multiple Bedrock worlds)
+
+`services/minecraft/` is a multi-instance service: each world in `MINECRAFT_INSTANCES`
+runs as its own Bedrock server (`minecraft-<world>`) with its own UDP port and ZFS-backed
+`/data` (`${DOCKER_APPDATA_ROOT}/minecraft/<world>`). Per-world settings (port, game mode,
+difficulty, …) live in `<config_dir>/minecraft/<world>.env` (copy
+`services/minecraft/world.env.example`); gamerules such as
+`keepInventory` go in `<config_dir>/minecraft/<world>.init` (one command per line) and are
+applied automatically after start (see `services/minecraft/post-up.sh`).
+
+Game consoles can't enter an arbitrary server IP, so `services/bedrock-connect/` runs
+[BedrockConnect](https://github.com/Pugmatt/BedrockConnect): point an AdGuard DNS rewrite of
+an unused "featured server" hostname at the Docker host, and consoles get an in-game menu of
+the worlds. The menu is defined by `custom_servers.json` in the NAS directory
+`BEDROCK_CONNECT_CONFIG` (see `services/bedrock-connect/custom_servers.example.json`).
+Adding a world is therefore NAS-only: create its `<world>.env`, add it to `MINECRAFT_INSTANCES`,
+and add an entry to the BedrockConnect menu file.
 
 ## Env Files
 
