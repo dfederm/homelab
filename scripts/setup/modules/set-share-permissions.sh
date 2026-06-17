@@ -3,7 +3,7 @@
 # Idempotent — re-applies ownership and ACLs on top-level dirs only.
 #
 # Env vars:
-#   SHARE_ROOT     - Root path of the file share (e.g. /mnt/federshare)
+#   SHARE_ROOT     - Root path of the file share (e.g. /mnt/share)
 #   HOMELAB_USERS  - Space-separated prefixes for user definitions
 #     Each prefix requires: _GROUPS (comma-separated group names)
 #     Username is derived by lowercasing the prefix.

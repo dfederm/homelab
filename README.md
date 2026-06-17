@@ -30,6 +30,7 @@ All data lives on a ZFS pool and is bind-mounted into containers. The LXC root f
 │   ├── run-all-services.sh
 │   ├── run-service.sh     # Deploy a single Docker Compose service
 │   ├── storage/           # Host-level storage-health scripts (ZFS scrub/health, SMART alert dispatch)
+│   ├── storage-space-check.sh # Threshold alerts for thin-pool + ZFS pool capacity
 │   ├── update.sh          # Update system packages on host and all LXCs
 │   └── setup/
 │       ├── setup.sh       # Main setup runner (see below)
@@ -88,10 +89,12 @@ Modules are standalone, idempotent scripts in `scripts/setup/modules/`. Each han
 | `configure-proxmox-repos` | Switch from paid enterprise repos to free community repos | Proxmox host |
 | `configure-smb-mount` | Mount NAS share via CIFS, persist in fstab | Remote machines |
 | `configure-ssh` | Harden SSH (key-only auth) and deploy authorized keys | All machines |
+| `configure-storage-alerts` | Periodic threshold alerts for LVM thin-pool + ZFS pool capacity (the storage Beszel can't see) | Proxmox host |
 | `configure-storage-health` | Schedule monthly ZFS scrubs + daily pool health check + SMART self-tests (smartd), with degradation alerting | Proxmox host |
 | `create-lxcs` | Create/update LXC containers from env var definitions (supports GPU passthrough via `_GPU=1`) | Proxmox host |
 | `create-vms` | Create/update VMs (e.g. Home Assistant) | Proxmox host |
 | `create-users` | Create Linux users/groups with aligned UIDs across machines | Docker LXC, NAS LXC |
+| `install-beszel-agent` | Install the Beszel monitoring agent natively (binary + systemd) on hosts without Docker | Proxmox host, NAS LXC |
 | `install-docker` | Install Docker Engine from official apt repo | Docker LXC |
 | `install-samba` | Install Samba, generate smb.conf from env vars | NAS LXC |
 | `install-tools` | Install common utilities (git, jq, htop, curl) | All machines |
@@ -103,18 +106,24 @@ The `create-lxcs` module doesn't just create containers — after creation, it r
 
 ```
 setup.sh on Proxmox host
-  → configure-proxmox-repos, install-tools, configure-amdgpu, configure-ssh
+  → configure-proxmox-repos, install-tools, configure-amdgpu, configure-ssh,
+    install-beszel-agent, configure-storage-alerts
   → configure-storage-health (ZFS scrub + SMART self-tests + alerting), configure-scrutiny-collector
   → create-lxcs
     → creates Docker LXC (GPU passthrough if _GPU=1), then runs setup.sh inside it
       → create-users, install-tools, configure-ssh, install-docker, configure-macvlan-bridge
-      → deploys HOMELAB_SERVICES (Jellyfin, Immich, Caddy, Scrutiny, etc.)
+      → deploys HOMELAB_SERVICES (Jellyfin, Immich, Caddy, Scrutiny, monitoring, monitoring-agent, etc.)
     → creates NAS LXC, then runs setup.sh inside it
-      → create-users, install-tools, configure-ssh, install-samba, set-share-permissions
+      → create-users, install-tools, configure-ssh, install-samba, set-share-permissions,
+        install-beszel-agent
   → create-vms (Home Assistant)
 ```
 
 One command. Everything configured.
+
+The Proxmox host and NAS LXC don't run Docker, so they get the Beszel monitoring
+agent natively (`install-beszel-agent`) instead of the `monitoring-agent` Docker
+service that the Docker hosts use — every host reports to the same Beszel hub.
 
 ### Adding an LXC
 
@@ -357,10 +366,10 @@ Convention:
   ├── config/
   │   ├── common.env        # Shared vars (TZ, network, users/groups)
   │   ├── authorized_keys   # SSH public keys (shared by all machines)
-  │   ├── olympus.env       # Proxmox host
-  │   ├── apollo.env        # Docker LXC
-  │   ├── atlas.env         # NAS LXC
-  │   └── argus.env         # Alarm panel Pi
+  │   ├── proxmox.env       # Proxmox host
+  │   ├── docker.env        # Docker LXC
+  │   ├── nas.env           # NAS LXC
+  │   └── pi.env            # Raspberry Pi (e.g. kiosk)
   └── repo/                # This git repo
 ```
 

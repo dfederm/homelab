@@ -31,6 +31,10 @@ services:
       - TZ=${TZ}
       - SCRUTINY_WEB_INFLUXDB_HOST=scrutiny-influxdb
       - SCRUTINY_WEB_INFLUXDB_PORT=8086
+      # Drive-health alerts reuse the homelab's single shared Shoutrrr channel
+      # (same URL the Beszel hub and the storage-space check use). Config-driven:
+      # set HOMELAB_ALERT_SHOUTRRR_URL in common.env; blank = no notifications.
+      - SCRUTINY_NOTIFY_URLS=${HOMELAB_ALERT_SHOUTRRR_URL:-}
     depends_on:
       scrutiny-influxdb:
         condition: service_healthy

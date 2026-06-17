@@ -3,7 +3,7 @@
 # Idempotent — installs once, generates smb.conf from env vars, restarts only if changed.
 #
 # Env vars:
-#   SHARE_ROOT      - Root path of the file share (e.g. /mnt/federshare)
+#   SHARE_ROOT      - Root path of the file share (e.g. /mnt/share)
 #   HOMELAB_USERS   - Space-separated prefixes for user definitions
 #   HOMELAB_GROUPS  - Space-separated prefixes for group definitions
 #   SMB_ROOT_SHARE   - (Optional) Name for a root share exposing SHARE_ROOT (all users)
@@ -144,7 +144,7 @@ if [ -n "${SMB_HOMELAB_PATH:-}" ]; then
     chown root:admin "$SMB_HOMELAB_PATH/appdata"
     chmod 775 "$SMB_HOMELAB_PATH/appdata"
 
-    # Repo dir needs admin read access (remote machines, e.g. argus, source setup.sh
+    # Repo dir needs admin read access (remote machines, e.g. a Raspberry Pi, source setup.sh
     # from the SMB-mounted repo via the svc service account, which is in the admin group).
     # Use capital X so non-executable files don't gain spurious execute bits — git tracks file modes.
     if [ -d "$SMB_HOMELAB_PATH/repo" ]; then

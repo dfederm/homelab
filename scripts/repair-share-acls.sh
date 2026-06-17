@@ -25,7 +25,7 @@
 #
 # Examples:
 #   bash scripts/repair-share-acls.sh                       # dry-run, all managed roots
-#   bash scripts/repair-share-acls.sh adults/Documents      # dry-run, federshare subtree
+#   bash scripts/repair-share-acls.sh adults/Documents      # dry-run, a file-share subtree
 #   bash scripts/repair-share-acls.sh --apply adults        # apply to adults/
 #   bash scripts/repair-share-acls.sh --apply /mnt/media    # apply to media share
 #   bash scripts/repair-share-acls.sh --apply /mnt/homelab/config    # apply to homelab config dir
@@ -250,7 +250,7 @@ done
 add_job "$SHARE_ROOT/adults" root adults "group:admin:rwx,group:adults:rwx" 0
 add_job "$SHARE_ROOT/family" root family "group:admin:rwx,group:family:rwx" 0
 
-# Optional media share (admin-only). Same ACL idiom as the federshare jobs.
+# Optional media share (admin-only). Same ACL idiom as the file-share jobs.
 # `mask::rwx` is included explicitly so a file whose group mode bits drifted
 # low (which would otherwise collapse the ACL mask and silently neuter the
 # named-group entry) is restored to full admin-group writability.
