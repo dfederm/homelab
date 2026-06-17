@@ -147,8 +147,15 @@ User=beszel
 Restart=on-failure
 RestartSec=5
 StateDirectory=beszel-agent
+EOF
+    # The hardening directives below rely on mount namespacing, which fails inside
+    # an LXC (systemd exits 226/NAMESPACE and the agent crash-loops). Apply them only
+    # on bare-metal/VM hosts; in a container the agent still runs as the unprivileged
+    # `beszel` user, matching the Docker agent's posture.
+    if ! systemd-detect-virt --container --quiet; then
+        cat <<EOF
 
-# Security/sandboxing (read-only access is sufficient for metric collection)
+# Security/sandboxing (bare-metal/VM only; read-only access suffices for metrics)
 KeyringMode=private
 LockPersonality=yes
 ProtectClock=yes
@@ -158,6 +165,9 @@ ProtectKernelLogs=yes
 ProtectSystem=strict
 RemoveIPC=yes
 RestrictSUIDSGID=true
+EOF
+    fi
+    cat <<EOF
 
 [Install]
 WantedBy=multi-user.target
@@ -183,6 +193,15 @@ if [ "$binary_changed" = 1 ] || [ "$unit_changed" = 1 ]; then
 elif ! systemctl is-active --quiet beszel-agent.service; then
     systemctl start beszel-agent.service
     echo "beszel-agent started"
+fi
+
+# Verify it actually came up. A failed unit auto-restarts (Restart=on-failure), so
+# `systemctl restart` can return 0 while the agent is crash-looping; fail loudly here.
+sleep 1
+if ! systemctl is-active --quiet beszel-agent.service; then
+    echo "ERROR: beszel-agent is not active after start; recent status:" >&2
+    systemctl --no-pager --lines=15 status beszel-agent.service >&2 || true
+    exit 1
 fi
 
 echo "Beszel agent ready on port ${BESZEL_AGENT_PORT}"
