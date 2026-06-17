@@ -4,7 +4,7 @@ services:
     # Official image (Codeberg registry) — using Docker Hub mirror due to
     # Comcast/Hetzner routing issues preventing pulls from codeberg.org
     # image: codeberg.org/forgejo/forgejo:14.0.3@sha256:8f4b1f86750e206824c669e1af17b6c6e8da9ed1a8ebda615db7526ee86d3eb2
-    image: forgejoclone/forgejo:15.0.2@sha256:432efe03d3820eaecb3cf63f38f9aa9dddcd2187a8ecd9ae81c153c8a449cdf9
+    image: forgejoclone/forgejo:15.0.3@sha256:4ac77d131a6cea2d0023561b0638857bdf863394f83b9bdc6ba5fe426c2e5f62
     restart: unless-stopped
     environment:
       - TZ=${TZ}
