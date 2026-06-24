@@ -36,6 +36,7 @@ All data lives on a ZFS pool and is bind-mounted into containers. The LXC root f
 │       ├── setup.sh       # Main setup runner (see below)
 │       └── modules/       # Idempotent setup modules
 └── services/              # Docker Compose service definitions
+    ├── ai/               # Ollama (local LLM serving)
     ├── backup/            # Rclone cloud backup
     ├── bedrock-connect/   # Console server-list menu (BedrockConnect) for Minecraft
     ├── dns/               # AdGuard Home
@@ -325,6 +326,25 @@ Services are defined per-machine in the env file:
 ```
 HOMELAB_SERVICES=dns,reverse-proxy,jellyfin,photos,files,monitoring,homepage,dozzle
 ```
+
+### AI (Ollama)
+
+`services/ai/` runs [Ollama](https://ollama.com) for local, CPU-based LLM serving on the
+Docker host. Models are pulled into `${DOCKER_APPDATA_ROOT}/ollama` (ZFS-backed) so they
+survive container recreation. Ollama has **no authentication**, so it is never placed
+behind the public reverse proxy — it is reachable only on the internal `ai` Docker network
+(which future AI services such as a web chat UI join to reach it at `http://ollama:11434`)
+and, via `OLLAMA_HTTP_PORT`, on the LAN.
+
+Models are **pulled declaratively**: the `ollama-pull` container pulls everything in
+`OLLAMA_PULL_MODELS` (set per machine in the env file; `.env.template` documents the
+recommended set) on each deploy, once the server is healthy, then exits. This is
+idempotent — already-present models are skipped. Large pulls run in the background; follow
+progress with:
+```bash
+docker logs -f ollama-pull
+```
+To pull an extra model ad-hoc: `docker exec ollama ollama pull <model>`.
 
 ### Multi-instance services
 

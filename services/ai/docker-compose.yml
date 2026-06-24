@@ -1,0 +1,57 @@
+# Local LLM serving for the family AI stack. Open WebUI joins this same project on
+# the shared `ai` network in a later step and reaches Ollama at http://ollama:11434.
+# Ollama has no authentication, so it is never placed behind the public reverse proxy —
+# it is reachable only on the internal Docker network and the LAN.
+services:
+  ollama:
+    container_name: ollama
+    image: ollama/ollama:0.30.10@sha256:bfc9c6d53cc6989aa5131a6fde6b162b2802d4d337657f3253b5f69579bddeee
+    restart: unless-stopped
+    environment:
+      - TZ=${TZ}
+    volumes:
+      # Pulled models persist here so they survive container recreation.
+      - ${DOCKER_APPDATA_ROOT}/ollama:/root/.ollama
+    ports:
+      - '${OLLAMA_HTTP_PORT}:11434'
+    networks:
+      - ai
+    healthcheck:
+      test: ['CMD', 'ollama', 'ls']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # Declaratively ensures the configured models are present. Runs once each deploy after
+  # the server is healthy, then exits. `ollama pull` is idempotent (already-present models
+  # are skipped) and runs server-side, so this is a thin API client — no volume needed.
+  # A large pull (e.g. qwen3:30b) downloads in the background; follow it with
+  # `docker logs -f ollama-pull`.
+  ollama-pull:
+    container_name: ollama-pull
+    image: ollama/ollama:0.30.10@sha256:bfc9c6d53cc6989aa5131a6fde6b162b2802d4d337657f3253b5f69579bddeee
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      - OLLAMA_HOST=ollama:11434
+      - OLLAMA_PULL_MODELS=${OLLAMA_PULL_MODELS}
+    networks:
+      - ai
+    entrypoint: ['/bin/sh', '-c']
+    command:
+      - |
+        set -eu
+        echo "Ensuring models present: $$OLLAMA_PULL_MODELS"
+        for model in $$OLLAMA_PULL_MODELS; do
+          echo "==> ollama pull $$model"
+          ollama pull "$$model"
+        done
+        echo "All requested models are present."
+    restart: 'no'
+
+networks:
+  ai:
+    name: ai
+    driver: bridge
