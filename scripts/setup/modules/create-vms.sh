@@ -8,6 +8,10 @@
 # Existing VMs: applies config via qm set, restarts only if changed.
 # New VMs: creates with qm create, imports disk image if _IMAGE is set.
 #
+# All managed VM boot disks (scsi0) get discard=on,ssd=1: they live on the
+# SSD-backed local-lvm thin pool, so discard lets guest TRIM/fstrim return
+# freed blocks to the pool instead of the volume bloating toward its full size.
+#
 # Required env vars per prefix:
 #   _VMID, _HOSTNAME, _MEMORY_MIB, _CORES
 #
@@ -58,13 +62,35 @@ create_or_update_vm() {
             i=$((i + 2))
         done
 
-        if [ "$needs_update" = true ]; then
+        # Ensure the boot disk has discard=on,ssd=1. The disk lives on the
+        # SSD-backed local-lvm thin pool, so without discard the guest's freed
+        # blocks are never returned to the pool and the volume's pool allocation
+        # only ever grows toward its full provisioned size. These options are
+        # appended to whatever volume/size the disk already has, so the existing
+        # disk is preserved (no reallocation).
+        local current_scsi0 new_scsi0
+        current_scsi0=$(echo "$current_config" | awk -F': ' '$1 == "scsi0" {print $2}')
+        new_scsi0="$current_scsi0"
+        if [ -n "$current_scsi0" ]; then
+            [[ "$new_scsi0" == *discard=on* ]] || new_scsi0="${new_scsi0},discard=on"
+            [[ "$new_scsi0" == *ssd=1* ]] || new_scsi0="${new_scsi0},ssd=1"
+        fi
+        local disk_needs_update=false
+        [ "$new_scsi0" != "$current_scsi0" ] && disk_needs_update=true
+
+        if [ "$needs_update" = true ] || [ "$disk_needs_update" = true ]; then
             if [ "$(qm status "$vmid" | awk '{print $2}')" = "running" ]; then
                 echo "Stopping VM for config update..."
                 qm shutdown "$vmid" --timeout 30 2>/dev/null || qm stop "$vmid"
             fi
-            qm set "$vmid" "${_common[@]}"
-            echo "$prefix VM $vmid config updated"
+            if [ "$needs_update" = true ]; then
+                qm set "$vmid" "${_common[@]}"
+                echo "$prefix VM $vmid config updated"
+            fi
+            if [ "$disk_needs_update" = true ]; then
+                qm set "$vmid" --scsi0 "$new_scsi0"
+                echo "$prefix VM $vmid disk options updated: $new_scsi0"
+            fi
         else
             echo "$prefix VM $vmid config unchanged"
         fi
@@ -89,7 +115,7 @@ create_or_update_vm() {
             fi
             echo "Importing disk image: $disk_path"
             qm importdisk "$vmid" "$disk_path" local-lvm
-            qm set "$vmid" --scsi0 "local-lvm:vm-${vmid}-disk-${next_disk}"
+            qm set "$vmid" --scsi0 "local-lvm:vm-${vmid}-disk-${next_disk},discard=on,ssd=1"
             qm set "$vmid" --boot order=scsi0
         fi
 
