@@ -1,12 +1,24 @@
 services:
+  # Generic template for one backup target. Deployed once per target by
+  # run-service.sh, which sets BACKUP_INSTANCE and layers the per-target env file
+  # (see BACKUP_INSTANCES in .env.template). Add a target without editing this file —
+  # just add its name to the list and create its per-target env file.
   rclone:
-    container_name: backup-rclone
+    container_name: backup-${BACKUP_INSTANCE}
+    image: rclone/rclone:1.74.3@sha256:623378ad0ff3ebd5cebf77720843c0e02edfe46e2d5b5ac6bed54c6371780dfb
     restart: unless-stopped
     tty: true
     environment:
       - TZ=${TZ}
-      - BACKUP_TARGETS=${BACKUP_TARGETS}
+      - BACKUP_DEST=${BACKUP_DEST}
+      # Optional cron schedule; start.sh defaults to "0 3 * * *" when unset.
+      - BACKUP_CRON=${BACKUP_CRON:-}
     volumes:
+      # Shared rclone config (all remotes). Read-write so OneDrive OAuth token
+      # refreshes persist; each target only reads its own remote.
       - ${DOCKER_APPDATA_ROOT}/backup/rclone:/config/rclone:rw
-      - ${BACKUP_DATA_ROOT}:/data:ro
-    build: .
+      # Only this target's source directory, read-only.
+      - ${BACKUP_DATA_ROOT}/${BACKUP_SOURCE_DIR}:/data:ro
+      - ./start.sh:/start.sh:ro
+      - ./backup.sh:/backup.sh:ro
+    entrypoint: ["/bin/sh", "/start.sh"]

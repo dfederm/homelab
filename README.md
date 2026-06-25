@@ -376,6 +376,26 @@ the worlds. The menu is defined by `custom_servers.json` in the NAS directory
 Adding a world is therefore NAS-only: create its `<world>.env`, add it to `MINECRAFT_INSTANCES`,
 and add an entry to the BedrockConnect menu file.
 
+### Backup (cloud sync)
+
+`services/backup/` is a multi-instance service: each target in `BACKUP_INSTANCES` runs as its
+own `rclone` container (`backup-<target>`) that syncs one read-only source directory under
+`BACKUP_DATA_ROOT` to a cloud destination. Per-target settings — the source subdirectory
+(`BACKUP_SOURCE_DIR`), the rclone destination (`BACKUP_DEST`), and an optional cron schedule
+(`BACKUP_CRON`) — live in `<config_dir>/backup/<target>.env` (copy
+`services/backup/backup.env.example`). Each container runs the sync once on start and then on
+its cron schedule (default 03:00 daily; stagger `BACKUP_CRON` per target to avoid contention);
+a failed sync exits non-zero and is visible in the container logs.
+
+The rclone remotes are defined once in the shared config at `${DOCKER_APPDATA_ROOT}/backup/rclone`,
+mounted read-write so OAuth token refreshes (e.g. OneDrive) persist. Each target reads only its
+own remote. Because the config is shared and rclone rewrites it on a token refresh, stagger
+`BACKUP_CRON` so targets don't refresh at the same instant; the on-start syncs aren't staggered,
+but at deploy time tokens are normally still valid, so a refresh race there is unlikely.
+
+Adding a target is therefore NAS-only: create its `<target>.env` and add its name to
+`BACKUP_INSTANCES` — no repo change.
+
 ## Env Files
 
 Machine-specific configuration lives in `.env` files **outside the repo** (not committed — they contain secrets). The `.env.template` in the repo documents all available variables.
