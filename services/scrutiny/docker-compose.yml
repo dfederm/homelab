@@ -4,7 +4,7 @@ services:
   # auto-provisions the InfluxDB org/bucket/token on first start.
   scrutiny-influxdb:
     container_name: scrutiny-influxdb
-    image: influxdb:2.8@sha256:e3e7ee6476007edc0577e9114c78028112e92e48ead3545865d35187cd9a5eda
+    image: influxdb:2.9@sha256:bfe360b59cb6a351a648cb2df37e559f0c0436248c2e05876cace58c26072ecc
     restart: unless-stopped
     volumes:
       - ${DOCKER_APPDATA_ROOT}/scrutiny/influxdb:/var/lib/influxdb2
