@@ -39,3 +39,8 @@
 	rewrite * /hooks{uri}
 	reverse_proxy localhost:{$WEBHOOK_HTTP_PORT}
 }
+
+# Open WebUI - AI chat frontend (Ollama has no block — it stays internal-only)
+{$OPEN_WEBUI_FQDN} {
+	reverse_proxy localhost:{$OPEN_WEBUI_HTTP_PORT}
+}

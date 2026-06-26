@@ -2,9 +2,9 @@
 # internal `ai` network, so Open WebUI reaches Ollama at http://ollama:11434.
 # Ollama has no authentication, so it is never placed behind the public reverse proxy —
 # it is reachable only on the internal Docker network and the LAN. Open WebUI has its own
-# multi-user auth and is the component intended for public exposure via Caddy — but that
-# exposure is wired as a separate, later change (see the README) so the admin account can be
-# created over the LAN before the public route exists.
+# multi-user auth and is exposed publicly via Caddy (the site block lives in
+# services/reverse-proxy/Caddyfile). Because it is internet-facing from first boot, claim the
+# admin account promptly on a fresh deploy (the first account to register becomes admin).
 services:
   ollama:
     container_name: ollama
@@ -56,8 +56,8 @@ services:
 
   # Multi-user chat / agent frontend in front of Ollama. Reaches the model server over the
   # internal `ai` network at http://ollama:11434. Open WebUI has its own auth (first account
-  # created becomes the admin); it is reachable on the LAN via the published port and can be
-  # exposed publicly via Caddy as a separate, later change (see the README).
+  # created becomes the admin); it is reachable on the LAN via the published port and exposed
+  # publicly via Caddy (site block in services/reverse-proxy/Caddyfile).
   # Its SQLite DB + ChromaDB (per-user chats, settings, RAG vectors) persist on ZFS-backed
   # appdata so they survive container recreation.
   # NOTE: many of these env vars (OLLAMA_BASE_URL, WEBUI_URL, TASK_MODEL, ENABLE_OPENAI_API,

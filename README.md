@@ -341,15 +341,17 @@ behind the public reverse proxy — it is reachable only on the internal `ai` ne
 WebUI reaches it at `http://ollama:11434`) and, via `OLLAMA_HTTP_PORT`, on the LAN.
 
 Open WebUI **does** have its own multi-user auth (the first account created becomes the
-admin). Its SQLite DB + ChromaDB (per-user chats, settings, RAG vectors) persist on
-`${DOCKER_APPDATA_ROOT}/open-webui` (ZFS-backed). It currently has **no Caddy block**, so it
-is reachable only on the LAN at `http://<docker-host-ip>:${OPEN_WEBUI_HTTP_PORT}` — see
-"Exposing Open WebUI publicly" below for why, and how to expose it.
+admin), so unlike Ollama it is exposed via Caddy at `OPEN_WEBUI_FQDN`. It is also reachable
+on the LAN at `http://<docker-host-ip>:${OPEN_WEBUI_HTTP_PORT}`. Its SQLite DB + ChromaDB
+(per-user chats, settings, RAG vectors) persist on `${DOCKER_APPDATA_ROOT}/open-webui`
+(ZFS-backed).
 
 First-run setup notes:
-- Create the admin account on first visit (the first account becomes the admin/owner). Do it
-  from the LAN before any public route exists — the first-admin signup intentionally bypasses
-  the signup toggle, so whoever registers first wins.
+- **Claim the admin account immediately on a fresh deploy.** Open WebUI is internet-facing
+  from the first deploy, and the first account to register becomes the admin/owner (the
+  initial-admin signup intentionally bypasses the signup toggle). Create yours right away —
+  ideally over the LAN at `http://<docker-host-ip>:${OPEN_WEBUI_HTTP_PORT}` before sharing the
+  public URL — so nobody else can claim it.
 - Public self-registration is disabled (`ENABLE_SIGNUP=false`); add each family member via
   Admin Settings → Users → Add User. New accounts also default to `pending` (no model
   access) until approved.
@@ -360,25 +362,6 @@ First-run setup notes:
   changed later in the UI (it is a first-launch-seeded "PersistentConfig" value).
 - `OPEN_WEBUI_RAG_EMBEDDING_MODEL` (e.g. `nomic-embed-text`) is used via the local Ollama
   for RAG embeddings instead of Open WebUI's bundled embedder.
-
-#### Exposing Open WebUI publicly
-
-Public exposure is deliberately a **separate, later change** from the initial deploy.
-Because a merge to `main` redeploys all services at once, wiring the Caddy block in the same
-change would expose `OPEN_WEBUI_FQDN` to the internet *before* any admin account exists —
-and the first account to register becomes the admin. So: first deploy Open WebUI LAN-only,
-create your admin account over the LAN, then add the Caddy site block to expose it:
-
-```caddyfile
-# Open WebUI - AI chat frontend (Ollama stays internal-only, no Caddy block)
-{$OPEN_WEBUI_FQDN} {
-	reverse_proxy localhost:{$OPEN_WEBUI_HTTP_PORT}
-}
-```
-
-`OPEN_WEBUI_FQDN` / `WEBUI_URL` are already wired from the first deploy (the latter is
-PersistentConfig — it must be seeded with the final public URL on first boot), so this step
-is just the Caddyfile block.
 
 Models are **pulled declaratively**: the `ollama-pull` container pulls everything in
 `OLLAMA_PULL_MODELS` (set per machine in the env file; `.env.template` documents the
