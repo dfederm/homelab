@@ -1,7 +1,10 @@
-# Local LLM serving for the family AI stack. Open WebUI joins this same project on
-# the shared `ai` network in a later step and reaches Ollama at http://ollama:11434.
+# Local LLM serving + chat frontend for the family AI stack. Both containers share the
+# internal `ai` network, so Open WebUI reaches Ollama at http://ollama:11434.
 # Ollama has no authentication, so it is never placed behind the public reverse proxy —
-# it is reachable only on the internal Docker network and the LAN.
+# it is reachable only on the internal Docker network and the LAN. Open WebUI has its own
+# multi-user auth and is the component intended for public exposure via Caddy — but that
+# exposure is wired as a separate, later change (see the README) so the admin account can be
+# created over the LAN before the public route exists.
 services:
   ollama:
     container_name: ollama
@@ -50,6 +53,60 @@ services:
         done
         echo "All requested models are present."
     restart: 'no'
+
+  # Multi-user chat / agent frontend in front of Ollama. Reaches the model server over the
+  # internal `ai` network at http://ollama:11434. Open WebUI has its own auth (first account
+  # created becomes the admin); it is reachable on the LAN via the published port and can be
+  # exposed publicly via Caddy as a separate, later change (see the README).
+  # Its SQLite DB + ChromaDB (per-user chats, settings, RAG vectors) persist on ZFS-backed
+  # appdata so they survive container recreation.
+  # NOTE: many of these env vars (OLLAMA_BASE_URL, WEBUI_URL, TASK_MODEL, ENABLE_OPENAI_API,
+  # ENABLE_SIGNUP, DEFAULT_USER_ROLE, RAG_EMBEDDING_*) are "PersistentConfig" — read on first
+  # launch then stored in the DB (config.json). After the first deploy they are managed in the
+  # UI/DB, so changing them here later has no effect unless the data volume is wiped. They seed
+  # sane first-run defaults.
+  open-webui:
+    container_name: open-webui
+    image: ghcr.io/open-webui/open-webui:v0.9.6@sha256:90eae5b419e40b4c3dd684582b2c83440b36f9ae2f6532c09639b2ba4ee65158
+    restart: unless-stopped
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      - TZ=${TZ}
+      - OLLAMA_BASE_URL=http://ollama:11434
+      # Public URL, used for share links / OAuth redirects / notifications.
+      - WEBUI_URL=https://${OPEN_WEBUI_FQDN}
+      # Internal-only stack: don't reach out to OpenAI, only the local Ollama.
+      - ENABLE_OPENAI_API=false
+      # Family instance: no public self-registration — the admin provisions each account
+      # (Admin Settings -> Users -> Add User). NOTE: the very first account to register still
+      # becomes the admin (initial-admin signup intentionally bypasses this flag), so create
+      # yours promptly on first launch before exposing it externally.
+      - ENABLE_SIGNUP=false
+      # Defense in depth: any account that does get created lands in 'pending' and cannot use
+      # the app (no model access) until an admin approves it.
+      - DEFAULT_USER_ROLE=pending
+      # Use the small/fast model for background tasks (title/tag/query generation) so the
+      # large chat model isn't burned on trivia. Seeds the first-run default; change in the UI.
+      - TASK_MODEL=${OPEN_WEBUI_TASK_MODEL}
+      # Use the local Ollama embeddings model for RAG instead of Open WebUI's bundled
+      # default, so the pulled embeddings model (OPEN_WEBUI_RAG_EMBEDDING_MODEL) is actually used.
+      - RAG_EMBEDDING_ENGINE=ollama
+      - RAG_EMBEDDING_MODEL=${OPEN_WEBUI_RAG_EMBEDDING_MODEL}
+    volumes:
+      - ${DOCKER_APPDATA_ROOT}/open-webui:/app/backend/data
+    ports:
+      - '${OPEN_WEBUI_HTTP_PORT}:8080'
+    networks:
+      - ai
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:8080/health']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      # Generous on first boot: cold start runs DB migrations + first-run RAG setup.
+      start_period: 60s
 
 networks:
   ai:

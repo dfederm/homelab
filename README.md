@@ -36,7 +36,7 @@ All data lives on a ZFS pool and is bind-mounted into containers. The LXC root f
 │       ├── setup.sh       # Main setup runner (see below)
 │       └── modules/       # Idempotent setup modules
 └── services/              # Docker Compose service definitions
-    ├── ai/               # Ollama (local LLM serving)
+    ├── ai/               # Ollama (local LLM serving) + Open WebUI (chat frontend)
     ├── backup/            # Rclone cloud backup
     ├── bedrock-connect/   # Console server-list menu (BedrockConnect) for Minecraft
     ├── dns/               # AdGuard Home
@@ -329,14 +329,56 @@ Services are defined per-machine in the env file:
 HOMELAB_SERVICES=dns,reverse-proxy,jellyfin,photos,files,monitoring,homepage,dozzle
 ```
 
-### AI (Ollama)
+### AI (Ollama + Open WebUI)
 
-`services/ai/` runs [Ollama](https://ollama.com) for local, CPU-based LLM serving on the
-Docker host. Models are pulled into `${DOCKER_APPDATA_ROOT}/ollama` (ZFS-backed) so they
+`services/ai/` runs the family AI stack as a single compose project on the shared internal
+`ai` Docker network: [Ollama](https://ollama.com) for local, CPU-based LLM serving, and
+[Open WebUI](https://openwebui.com) as the multi-user chat frontend in front of it.
+
+Ollama models are pulled into `${DOCKER_APPDATA_ROOT}/ollama` (ZFS-backed) so they
 survive container recreation. Ollama has **no authentication**, so it is never placed
-behind the public reverse proxy — it is reachable only on the internal `ai` Docker network
-(which future AI services such as a web chat UI join to reach it at `http://ollama:11434`)
-and, via `OLLAMA_HTTP_PORT`, on the LAN.
+behind the public reverse proxy — it is reachable only on the internal `ai` network (Open
+WebUI reaches it at `http://ollama:11434`) and, via `OLLAMA_HTTP_PORT`, on the LAN.
+
+Open WebUI **does** have its own multi-user auth (the first account created becomes the
+admin). Its SQLite DB + ChromaDB (per-user chats, settings, RAG vectors) persist on
+`${DOCKER_APPDATA_ROOT}/open-webui` (ZFS-backed). It currently has **no Caddy block**, so it
+is reachable only on the LAN at `http://<docker-host-ip>:${OPEN_WEBUI_HTTP_PORT}` — see
+"Exposing Open WebUI publicly" below for why, and how to expose it.
+
+First-run setup notes:
+- Create the admin account on first visit (the first account becomes the admin/owner). Do it
+  from the LAN before any public route exists — the first-admin signup intentionally bypasses
+  the signup toggle, so whoever registers first wins.
+- Public self-registration is disabled (`ENABLE_SIGNUP=false`); add each family member via
+  Admin Settings → Users → Add User. New accounts also default to `pending` (no model
+  access) until approved.
+- Switch tool calling to **Native** mode (the prompt-injection "Default" mode is deprecated)
+  per model that needs tools.
+- `OPEN_WEBUI_TASK_MODEL` seeds a small/fast task model (e.g. `qwen2.5:7b`) for
+  title/tag/query generation so the large chat model isn't burned on trivia; it can be
+  changed later in the UI (it is a first-launch-seeded "PersistentConfig" value).
+- `OPEN_WEBUI_RAG_EMBEDDING_MODEL` (e.g. `nomic-embed-text`) is used via the local Ollama
+  for RAG embeddings instead of Open WebUI's bundled embedder.
+
+#### Exposing Open WebUI publicly
+
+Public exposure is deliberately a **separate, later change** from the initial deploy.
+Because a merge to `main` redeploys all services at once, wiring the Caddy block in the same
+change would expose `OPEN_WEBUI_FQDN` to the internet *before* any admin account exists —
+and the first account to register becomes the admin. So: first deploy Open WebUI LAN-only,
+create your admin account over the LAN, then add the Caddy site block to expose it:
+
+```caddyfile
+# Open WebUI - AI chat frontend (Ollama stays internal-only, no Caddy block)
+{$OPEN_WEBUI_FQDN} {
+	reverse_proxy localhost:{$OPEN_WEBUI_HTTP_PORT}
+}
+```
+
+`OPEN_WEBUI_FQDN` / `WEBUI_URL` are already wired from the first deploy (the latter is
+PersistentConfig — it must be seeded with the final public URL on first boot), so this step
+is just the Caddyfile block.
 
 Models are **pulled declaratively**: the `ollama-pull` container pulls everything in
 `OLLAMA_PULL_MODELS` (set per machine in the env file; `.env.template` documents the
