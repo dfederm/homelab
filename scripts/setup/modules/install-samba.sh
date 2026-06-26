@@ -5,6 +5,9 @@
 # Env vars:
 #   SHARE_ROOT      - Root path of the file share (e.g. /mnt/share)
 #   HOMELAB_USERS   - Space-separated prefixes for user definitions
+#                     (a prefix with _SERVICE=1 is a service account: no personal
+#                      share, and a valid user only of the admin shares it needs,
+#                      not the family shares)
 #   HOMELAB_GROUPS  - Space-separated prefixes for group definitions
 #   SMB_ROOT_SHARE   - (Optional) Name for a root share exposing SHARE_ROOT (all users)
 #   SMB_MEDIA_PATH  - (Optional) Path to media library; creates admin-only share
@@ -31,7 +34,13 @@ fi
 apt-get update -qq > /dev/null
 apt-get install -y -qq samba samba-common-bin acl > /dev/null
 
-# Build user lists by group membership
+# Build user lists by group membership.
+# Admin membership is group-based and applies to everyone, so a service account
+# in the admin group is a valid user of the admin infrastructure shares
+# (homelab/media, via $admins). Service accounts (_SERVICE=1) are otherwise NOT
+# valid users of any non-admin share: they're left out of $all_users (the
+# root/federshare share and [family]) and $adults (the [adults] share and other
+# users' personal shares), so a repo-sync credential can't reach family data over SMB.
 adults=""
 admins=""
 all_users=""
@@ -40,12 +49,18 @@ for prefix in $HOMELAB_USERS; do
     name="${prefix,,}"
     groups_var="${prefix}_GROUPS"
     groups="${!groups_var}"
+    service_var="${prefix}_SERVICE"
+
+    if echo "$groups" | grep -qw "admin"; then
+        admins="$admins $name"
+    fi
+
+    # Service accounts are valid users only of the admin shares above.
+    [ "${!service_var:-0}" = "1" ] && continue
+
     all_users="$all_users $name"
     if echo "$groups" | grep -qw "adults"; then
         adults="$adults $name"
-    fi
-    if echo "$groups" | grep -qw "admin"; then
-        admins="$admins $name"
     fi
 done
 adults="${adults# }"
@@ -58,6 +73,9 @@ SMB_CONF=$(cat "$SMB_GLOBAL")
 # Personal shares (only if no root share is configured)
 if [ -z "${SMB_ROOT_SHARE:-}" ]; then
     for prefix in $HOMELAB_USERS; do
+        # Service accounts get no personal share (see set-share-permissions.sh)
+        service_var="${prefix}_SERVICE"
+        [ "${!service_var:-0}" = "1" ] && continue
         name="${prefix,,}"
         SMB_CONF="$SMB_CONF
 

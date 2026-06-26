@@ -231,11 +231,11 @@ MAX_UID=1003
 MAX_GROUPS="kids,family"
 ```
 
-Each prefix requires `_GID` (groups) or `_UID` + `_GROUPS` (users). Names are derived by lowercasing the prefix. A primary group matching the username and UID is created automatically for each user. User prefixes must not collide with existing `HOMELAB_*` variable names (e.g. don't use `HOMELAB` as a prefix — it would overwrite `HOMELAB_GROUPS`).
+Each prefix requires `_GID` (groups) or `_UID` + `_GROUPS` (users). A user prefix may also set `_SERVICE=1` to mark a service account (see below). Names are derived by lowercasing the prefix. A primary group matching the username and UID is created automatically for each user. User prefixes must not collide with existing `HOMELAB_*` variable names (e.g. don't use `HOMELAB` as a prefix — it would overwrite `HOMELAB_GROUPS`).
 
 To add a user: add their prefix to `HOMELAB_USERS` in `common.env`, define `_UID` and `_GROUPS`, then re-run `setup.sh` on each machine.
 
-**Service account:** A dedicated service account (e.g. `svc`) in the `admin` group exists for infrastructure tasks like SMB mounts from remote machines. This avoids tying infrastructure to a personal account — credential rotation and audit trails stay clean. Remote machines use this account to mount the NAS share and access the repo, config, and appdata.
+**Service account:** A dedicated service account (e.g. `svc`) in the `admin` group exists for infrastructure tasks like SMB mounts from remote machines. This avoids tying infrastructure to a personal account — credential rotation and audit trails stay clean. Remote machines use this account to mount the NAS share and access the repo, config, and appdata. It is marked `_SERVICE=1` (e.g. `SVC_SERVICE=1`): it's in the `admin` group purely for permissions, so the share modules give it **no personal share folder** (an existing empty one is cleaned up on the next `setup.sh` run) and make it a valid user only of the admin infrastructure shares it needs (`homelab`, `media`) — **not** the family file shares. This keeps a repo-sync credential (which lives on a remote machine) from reaching family data over SMB.
 
 ### File Sharing & Permissions
 

@@ -231,6 +231,9 @@ add_job() {
 
 # Per-user personal dirs
 for prefix in $HOMELAB_USERS; do
+    # Service accounts have no personal dir (mirror set-share-permissions.sh)
+    service_var="${prefix}_SERVICE"
+    [ "${!service_var:-0}" = "1" ] && continue
     validate_env "${prefix}_GROUPS"
     name="${prefix,,}"
     groups_var="${prefix}_GROUPS"

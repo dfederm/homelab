@@ -6,6 +6,9 @@
 #   SHARE_ROOT     - Root path of the file share (e.g. /mnt/share)
 #   HOMELAB_USERS  - Space-separated prefixes for user definitions
 #     Each prefix requires: _GROUPS (comma-separated group names)
+#     Optional per prefix: _SERVICE=1 marks a service account (in a group for
+#       permissions only) — it gets NO personal share folder, and any stale
+#       empty one left by an earlier run is removed.
 #     Username is derived by lowercasing the prefix.
 #
 # Directory structure (under SHARE_ROOT):
@@ -38,12 +41,26 @@ echo "Setting share permissions on $SHARE_ROOT..."
 chmod 755 "$SHARE_ROOT"
 
 for prefix in $HOMELAB_USERS; do
-    validate_env "${prefix}_GROUPS"
-
     name="${prefix,,}"
+    dir="$SHARE_ROOT/$name"
+
+    # Service accounts (e.g. svc) are in the admin group for permissions only and
+    # get no personal share folder. Remove a stale one left by an earlier run, but
+    # only if it's empty — rmdir refuses a non-empty dir, so no data is ever deleted.
+    service_var="${prefix}_SERVICE"
+    if [ "${!service_var:-0}" = "1" ]; then
+        if [ -d "$dir" ] && rmdir "$dir" 2>/dev/null; then
+            echo "  Removed stale service-account folder $dir"
+        elif [ -d "$dir" ]; then
+            echo "  WARNING: $dir is not empty — leaving it in place; a service account" \
+                 "should have no personal folder (inspect and remove manually)"
+        fi
+        continue
+    fi
+
+    validate_env "${prefix}_GROUPS"
     groups_var="${prefix}_GROUPS"
     groups="${!groups_var}"
-    dir="$SHARE_ROOT/$name"
 
     mkdir -p "$dir"
     chown "$name":"$name" "$dir"

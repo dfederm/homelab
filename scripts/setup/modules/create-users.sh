@@ -10,6 +10,10 @@
 #     e.g. HOMELAB_GROUPS="ADULTS KIDS" with ADULTS_GID=1100
 #   HOMELAB_USERS  - Space-separated prefixes for user definitions
 #     Each prefix requires: _UID, _GROUPS (comma-separated group names)
+#     Optional per prefix: _SERVICE=1 marks a service account — created normally
+#       (so it can be in a group for permissions), but the share modules give it
+#       no personal share folder and make it a valid user only of the admin shares
+#       it needs, not the family shares. Consumed by set-share-permissions / install-samba.
 #     Username is derived by lowercasing the prefix.
 #     A primary group with matching name and GID is created automatically.
 #     e.g. HOMELAB_USERS="ALICE BOB" with ALICE_UID=1001, ALICE_GROUPS="adults,family"
