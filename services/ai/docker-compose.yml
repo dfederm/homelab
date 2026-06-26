@@ -12,6 +12,7 @@ services:
     restart: unless-stopped
     environment:
       - TZ=${TZ}
+      - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE}
     volumes:
       # Pulled models persist here so they survive container recreation.
       - ${DOCKER_APPDATA_ROOT}/ollama:/root/.ollama
