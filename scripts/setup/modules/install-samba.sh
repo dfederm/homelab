@@ -171,6 +171,30 @@ if [ -n "${SMB_HOMELAB_PATH:-}" ]; then
     chmod 775 "$SMB_HOMELAB_PATH/images"
     setfacl -d -m g:admin:rwx "$SMB_HOMELAB_PATH/images"
 
+    # Admin-editable config dirs (SMB_ADMIN_CONFIG_DIRS): a space-separated list of
+    # appdata config dirs that a service writes but an admin also legitimately edits
+    # over SMB. Each is normalized to one uniform, service-agnostic policy — a
+    # deliberate, scoped exception to "appdata is owned by its writing service",
+    # justified because these hold hand-edited configuration, not opaque service data.
+    # The dir becomes root:admin 2770 (setgid so new files inherit the admin group)
+    # with a default ACL granting the admin group rwx, and files already inside are
+    # made group-writable and non-world-readable (g+rw,o= — keeps any secrets out of
+    # "other"). This keeps BOTH the writing container (root) and the admin group able
+    # to write. Where a service preserves an existing file's owner+mode when it
+    # rewrites it (e.g. rclone rewriting rclone.conf to rotate OAuth refresh tokens),
+    # the admin grant is durable across those rewrites; a file the service creates
+    # from scratch may land service-owned until the next run of this module
+    # re-normalizes it. A listed dir not yet present (service not deployed) is skipped.
+    for admin_cfg_dir in ${SMB_ADMIN_CONFIG_DIRS:-}; do
+        [ -d "$admin_cfg_dir" ] || continue
+        chown root:admin "$admin_cfg_dir"
+        chmod 2770 "$admin_cfg_dir"
+        setfacl -m g:admin:rwx -m m::rwx "$admin_cfg_dir"
+        setfacl -d -m g:admin:rwx -m m::rwx "$admin_cfg_dir"
+        find "$admin_cfg_dir" -maxdepth 1 -type f -exec chown root:admin {} + -exec chmod g+rw,o= {} +
+        echo "  $admin_cfg_dir: root:admin 2770, default ACL admin:rwx (contained files g+rw,o=)"
+    done
+
     # Repo dir needs admin read access (remote machines, e.g. a Raspberry Pi, source setup.sh
     # from the SMB-mounted repo via the svc service account, which is in the admin group).
     # Use capital X so non-executable files don't gain spurious execute bits — git tracks file modes.

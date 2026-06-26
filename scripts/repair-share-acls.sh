@@ -273,6 +273,14 @@ if [ -n "${SMB_HOMELAB_PATH:-}" ]; then
     add_job "$SMB_HOMELAB_PATH/images" root admin "group:admin:rwx,mask::rwx" 5
 fi
 
+# Admin-editable config dirs (SMB_ADMIN_CONFIG_DIRS) — the one exception under
+# appdata: these hold configuration an admin hand-edits (e.g. rclone.conf), so they
+# are deliberately kept admin-writable, with other=0 so any secrets (e.g. OAuth
+# tokens) aren't world-readable. Mirrors the block in install-samba.sh.
+for admin_cfg_dir in ${SMB_ADMIN_CONFIG_DIRS:-}; do
+    add_job "$admin_cfg_dir" root admin "group:admin:rwx,mask::rwx" 0
+done
+
 # Filter by TARGET if given
 if [ -n "$TARGET" ]; then
     if [[ "$TARGET" == /* ]]; then
