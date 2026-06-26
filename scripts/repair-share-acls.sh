@@ -272,6 +272,14 @@ if [ -n "${SMB_HOMELAB_PATH:-}" ]; then
     add_job "$SMB_HOMELAB_PATH/repo"   root admin "group:admin:rwx,mask::rwx" 5
 fi
 
+# Optional rclone backup config dir (config-driven via BACKUP_RCLONE_CONFIG_DIR) —
+# the one exception under appdata: rclone.conf is admin-hand-edited configuration,
+# so it is deliberately kept admin-writable (other=0 so the OAuth tokens aren't
+# world-readable). Mirrors the block in install-samba.sh.
+if [ -n "${BACKUP_RCLONE_CONFIG_DIR:-}" ]; then
+    add_job "$BACKUP_RCLONE_CONFIG_DIR" root admin "group:admin:rwx,mask::rwx" 0
+fi
+
 # Filter by TARGET if given
 if [ -n "$TARGET" ]; then
     if [[ "$TARGET" == /* ]]; then

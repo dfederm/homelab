@@ -258,7 +258,7 @@ The NAS LXC runs Samba for SMB file sharing. Permissions are enforced at the **f
 
 When `SMB_ROOT_SHARE` is set, a single root share exposes all user folders and shared dirs. Users map one drive and navigate to their folder. ACLs prevent them from opening folders they don't have access to. Individual per-user shares and `adults`/`family` shares are omitted to keep the share list clean.
 
-Infrastructure shares (`media`, `homelab`) are admin-only — non-admin family members access media through applications (e.g. Jellyfin), not the raw files. The `homelab` share's `config/` and `backup/` subdirectories are set to `root:admin 775` so admin users can edit env files and write backups (e.g. Home Assistant) via SMB.
+Infrastructure shares (`media`, `homelab`) are admin-only — non-admin family members access media through applications (e.g. Jellyfin), not the raw files. The `homelab` share's `config/` and `backup/` subdirectories are set to `root:admin 775` so admin users can edit env files and write backups (e.g. Home Assistant) via SMB. The backup service's rclone config dir under `appdata/` is a deliberate, scoped exception to "appdata is owned by its writing service": `rclone.conf` is admin-edited configuration, so `install-samba` keeps that dir `root:admin` with a default ACL granting `admin` write and `rclone.conf` at `660`, even though the rclone container also writes it.
 
 Samba share definitions are **generated** by `install-samba` from the user/group env vars — no static config file to maintain. The `[global]` section lives in `nas/smb.conf.global` in the repo.
 
@@ -418,8 +418,26 @@ own remote. Because the config is shared and rclone rewrites it on a token refre
 `BACKUP_CRON` so targets don't refresh at the same instant; the on-start syncs aren't staggered,
 but at deploy time tokens are normally still valid, so a refresh race there is unlikely.
 
+`rclone.conf` is both service-written (rclone rotates OAuth tokens back into it) and admin-edited
+(to add a remote / family member), so neither "owned by the service" nor "read-only admin config"
+fits. `install-samba` reconciles this when `BACKUP_RCLONE_CONFIG_DIR` points at that dir: it is
+owned `root:admin` with a default ACL granting the `admin` group write, and `rclone.conf` is
+normalized to `660` (`root:admin`, no world access to the tokens). rclone preserves an existing
+config file's owner+mode when it rewrites it, so that admin grant survives token rotations —
+admins can edit `rclone.conf` over SMB without getting locked out.
+
 Adding a target is therefore NAS-only: create its `<target>.env` and add its name to
-`BACKUP_INSTANCES` — no repo change.
+`BACKUP_INSTANCES` — no repo change. Its remote must exist in the shared `rclone.conf`; minting a
+OneDrive remote's token is a one-time interactive step (`rclone config` / `rclone config reconnect
+<remote>:` inside the container). On a brand-new config the container first creates `rclone.conf`
+as `root:root`; the next `setup.sh` (i.e. `install-samba`) run normalizes it to admin-editable.
+Shared folders with no single owner (e.g. `family`, `adults`)
+back up into an existing personal remote under a **separate** top-level path so they don't collide
+with that person's own backup — e.g. a `family` target → `onedrivedavid:/nas-backup-shared/family`
+while david's own backup stays at `onedrivedavid:/nas-backup`. This is enforced, not just advisory:
+`run-service.sh` runs `services/backup/pre-up.sh` before deploying and **aborts** if any two
+targets' destinations overlap on the same remote (an equal or ancestor path would let one target's
+pruning sync delete another's backup).
 
 ## Env Files
 

@@ -43,6 +43,12 @@ if [ -n "$INSTANCES" ]; then
     COMMON_ENV="$CONFIG_DIR/common.env"
     cd "$SERVICEPATH"
     export BUILDX_NO_DEFAULT_ATTESTATIONS=1
+    # Optional pre-deploy validation hook, run once before any instance is (re)deployed (e.g.
+    # backup checks its targets' destinations are disjoint). A non-zero exit aborts the whole
+    # deploy (set -e), so a destructive misconfiguration never reaches a container.
+    if [ -f "$SERVICEPATH/pre-up.sh" ]; then
+        bash "$SERVICEPATH/pre-up.sh" "$INSTANCES"
+    fi
     for INSTANCE in $INSTANCES; do
         echo ""
         echo "Deploying: $SERVICE ($INSTANCE)"

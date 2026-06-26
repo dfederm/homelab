@@ -162,6 +162,36 @@ if [ -n "${SMB_HOMELAB_PATH:-}" ]; then
     chown root:admin "$SMB_HOMELAB_PATH/appdata"
     chmod 775 "$SMB_HOMELAB_PATH/appdata"
 
+    # Backup rclone config dir (config-driven via BACKUP_RCLONE_CONFIG_DIR) — a
+    # deliberate, scoped exception to the rule that appdata contents are owned by
+    # their writing service. rclone.conf is configuration an admin hand-edits (to
+    # add remotes / family members) AND that the rclone backup container rewrites
+    # at runtime (on `rclone config`, and to rotate OAuth refresh tokens back into
+    # it), so it must stay writable by BOTH root (the container) and the admin
+    # group. When rclone rewrites an existing config file it preserves the file's
+    # owner, group, and mode, so normalizing rclone.conf to root:admin 660 ONCE is
+    # durable across token rotations — that is the load-bearing mechanism (admins
+    # write via the owning group). The default ACL is only a backstop for any
+    # other files created here; it does NOT rescue a rclone.conf the container
+    # creates from scratch, which lands root:root 0600 (admin-blind) until the
+    # next run of this module re-normalizes it. 660 also keeps the OAuth tokens
+    # out of "other". Set BACKUP_RCLONE_CONFIG_DIR to the backup service's rclone
+    # config dir (e.g. "$SMB_HOMELAB_PATH/appdata/backup/rclone"); unset, or the
+    # dir not yet present (service not deployed), is a no-op. (Verified against the
+    # digest-pinned rclone 1.74.3 config save; re-check if a major rclone bump
+    # changes how it writes the config.)
+    if [ -n "${BACKUP_RCLONE_CONFIG_DIR:-}" ] && [ -d "$BACKUP_RCLONE_CONFIG_DIR" ]; then
+        chown root:admin "$BACKUP_RCLONE_CONFIG_DIR"
+        chmod 770 "$BACKUP_RCLONE_CONFIG_DIR"
+        setfacl -m g:admin:rwx -m m::rwx "$BACKUP_RCLONE_CONFIG_DIR"
+        setfacl -d -m g:admin:rwx -m m::rwx "$BACKUP_RCLONE_CONFIG_DIR"
+        if [ -f "$BACKUP_RCLONE_CONFIG_DIR/rclone.conf" ]; then
+            chown root:admin "$BACKUP_RCLONE_CONFIG_DIR/rclone.conf"
+            chmod 660 "$BACKUP_RCLONE_CONFIG_DIR/rclone.conf"
+        fi
+        echo "  $BACKUP_RCLONE_CONFIG_DIR: root:admin 770, default ACL admin:rwx (rclone.conf 660)"
+    fi
+
     # Repo dir needs admin read access (remote machines, e.g. a Raspberry Pi, source setup.sh
     # from the SMB-mounted repo via the svc service account, which is in the admin group).
     # Use capital X so non-executable files don't gain spurious execute bits — git tracks file modes.
