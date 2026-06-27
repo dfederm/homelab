@@ -36,7 +36,7 @@ All data lives on a ZFS pool and is bind-mounted into containers. The LXC root f
 │       ├── setup.sh       # Main setup runner (see below)
 │       └── modules/       # Idempotent setup modules
 └── services/              # Docker Compose service definitions
-    ├── ai/               # Ollama (local LLM serving) + Open WebUI (chat frontend)
+    ├── ai/               # Ollama (LLM serving) + Open WebUI (chat) + SearXNG (web search)
     ├── backup/            # Rclone cloud backup
     ├── bedrock-connect/   # Console server-list menu (BedrockConnect) for Minecraft
     ├── dns/               # AdGuard Home
@@ -372,6 +372,31 @@ progress with:
 docker logs -f ollama-pull
 ```
 To pull an extra model ad-hoc: `docker exec ollama ollama pull <model>`.
+
+Open WebUI's **web search** is wired to the self-hosted SearXNG backend (see below), not
+the built-in DuckDuckGo scraper.
+
+### Web search (SearXNG)
+
+The `services/ai/` stack also runs [SearXNG](https://docs.searxng.org), a self-hosted
+metasearch engine, as the homelab's **private web-search backend**. It replaces Open WebUI's
+built-in DuckDuckGo search (scraping-based and rate-limit-prone) and is the intended backend
+for a future web-search MCP tool. It is a backend, not a family-facing UI — it has **no auth**, so
+like Ollama it is never placed behind the public reverse proxy. It publishes no host port:
+consumers reach it over the shared `ai` Docker network at `http://searxng:8080`.
+
+Config is declarative: `services/ai/searxng/settings.yml` is mounted read-only and carries only
+the overrides on top of SearXNG's defaults — chiefly enabling the **JSON API**
+(`search.formats: [html, json]`) so programmatic clients can query it. Its runtime cache
+persists on `${DOCKER_APPDATA_ROOT}/searxng` (ZFS-backed).
+
+- `SEARXNG_SECRET` (a **secret**, never committed) is injected at runtime and overrides
+  SearXNG's `server.secret_key`. Generate one with `openssl rand -hex 32`.
+- Open WebUI's web-search wiring is the `ENABLE_WEB_SEARCH` / `WEB_SEARCH_ENGINE=searxng` /
+  `SEARXNG_QUERY_URL` env on the `open-webui` service. These are Open WebUI **PersistentConfig**
+  values — read on first launch then managed in the UI/DB, so changing them later requires
+  re-seeding (wiping the Open WebUI data) or toggling them in Admin Settings → Web Search.
+- SearXNG deploys as part of the `ai` service — no separate `HOMELAB_SERVICES` entry is needed.
 
 ### Multi-instance services
 

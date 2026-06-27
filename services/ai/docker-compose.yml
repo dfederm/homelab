@@ -1,8 +1,9 @@
-# Local LLM serving + chat frontend for the family AI stack. Both containers share the
-# internal `ai` network, so Open WebUI reaches Ollama at http://ollama:11434.
-# Ollama has no authentication, so it is never placed behind the public reverse proxy —
-# it is reachable only on the internal Docker network and the LAN. Open WebUI has its own
-# multi-user auth and is exposed publicly via Caddy (the site block lives in
+# The family AI stack, sharing the internal `ai` network: Ollama (local LLM serving), Open
+# WebUI (chat frontend, reaches Ollama at http://ollama:11434), and SearXNG (private
+# web-search backend for Open WebUI, reached at http://searxng:8080).
+# Neither Ollama nor SearXNG has authentication, so neither is ever placed behind the public
+# reverse proxy — they are reachable only on the internal `ai` network and the LAN. Open WebUI
+# has its own multi-user auth and is exposed publicly via Caddy (the site block lives in
 # services/reverse-proxy/Caddyfile). Because it is internet-facing from first boot, claim the
 # admin account promptly on a fresh deploy (the first account to register becomes admin).
 services:
@@ -95,6 +96,15 @@ services:
       # default, so the pulled embeddings model (OPEN_WEBUI_RAG_EMBEDDING_MODEL) is actually used.
       - RAG_EMBEDDING_ENGINE=ollama
       - RAG_EMBEDDING_MODEL=${OPEN_WEBUI_RAG_EMBEDDING_MODEL}
+      # Web search via the self-hosted SearXNG backend (the searxng service below) instead of the
+      # built-in DuckDuckGo scraper — private and not rate-limit-prone. Reached over the shared
+      # `ai` network at http://searxng:8080. Open WebUI strips the query string and appends
+      # format=json itself, so SearXNG must have the JSON format enabled (it does, in
+      # searxng/settings.yml). Like the vars above these are PersistentConfig: read on first
+      # launch then managed in the UI/DB, so later changes here need a config reset.
+      - ENABLE_WEB_SEARCH=true
+      - WEB_SEARCH_ENGINE=searxng
+      - SEARXNG_QUERY_URL=http://searxng:8080/search?q=<query>
     volumes:
       - ${DOCKER_APPDATA_ROOT}/open-webui:/app/backend/data
     ports:
@@ -108,6 +118,46 @@ services:
       retries: 3
       # Generous on first boot: cold start runs DB migrations + first-run RAG setup.
       start_period: 60s
+
+  # Self-hosted SearXNG metasearch — the private web-search backend Open WebUI queries (see the
+  # web-search env on open-webui above), and the intended backend for a future web-search MCP
+  # tool. It has no auth, so like Ollama it is never placed behind the public reverse proxy. It
+  # is an internal-only backend: no host port is published — consumers reach it over the `ai`
+  # network at http://searxng:8080.
+  searxng:
+    container_name: searxng
+    image: searxng/searxng:2026.6.26-f8ffbf36f@sha256:15275f138662b0eefd62c492a919b29c4662c42004efe4b1a245c92cc6d2fef1
+    restart: unless-stopped
+    environment:
+      - TZ=${TZ}
+      # Instance secret. SearXNG natively lets this env var override server.secret_key, so the
+      # secret stays out of this public repo.
+      - SEARXNG_SECRET=${SEARXNG_SECRET}
+    volumes:
+      # Config is declarative: the committed settings.yml is mounted read-only (the secret is
+      # injected via SEARXNG_SECRET above, not stored here). Mounting a repo config file
+      # read-only mirrors services/reverse-proxy (Caddyfile) and services/webhook (hooks.json).
+      - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
+      # Runtime cache (favicons, etc.) on ZFS-backed appdata so it survives container recreation.
+      - ${DOCKER_APPDATA_ROOT}/searxng:/var/cache/searxng
+    networks:
+      - ai
+    healthcheck:
+      # The image has no guaranteed curl/wget, but its bundled Python venv is always present.
+      test:
+        - CMD
+        - /usr/local/searxng/.venv/bin/python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://localhost:8080/healthz')
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 networks:
   ai:

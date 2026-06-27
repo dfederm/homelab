@@ -1,0 +1,16 @@
+# SearXNG settings — only the overrides on top of SearXNG's shipped defaults
+# (use_default_settings merges this file over them), so keep it minimal.
+# Read the docs before extending: https://docs.searxng.org/admin/settings/
+#
+# The instance secret is NOT here: it is injected at runtime from the SEARXNG_SECRET
+# environment variable (set in common.env on the NAS, never committed), which natively
+# overrides server.secret_key. So no secret is stored in this public repo.
+use_default_settings: true
+
+search:
+  # Expose the JSON API in addition to the HTML UI so programmatic clients — Open WebUI's
+  # web search, and a future web-search MCP tool — can query SearXNG. (formats has no env
+  # override, so it must be set here.)
+  formats:
+    - html
+    - json
