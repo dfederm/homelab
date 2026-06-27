@@ -48,6 +48,16 @@
         "influxdb"
       ],
       "allowedVersions": "/^2\\./"
+    },
+    {
+      "description": "Vikunja's Postgres: stay on major 18 — a Postgres major upgrade needs a manual pg_upgrade/dump-restore and must not be automated (would break the data directory)",
+      "matchDatasources": [
+        "docker"
+      ],
+      "matchPackageNames": [
+        "postgres"
+      ],
+      "allowedVersions": "<19"
     }
   ],
   "docker-compose": {

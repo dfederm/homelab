@@ -1,0 +1,71 @@
+# Vikunja — self-hosted task management (the family tasks backend).
+# Recent Vikunja ships a single `vikunja/vikunja` container with the API and web
+# frontend merged, backed here by a dedicated Postgres container. Both run in this
+# compose project's default network, so Vikunja reaches the database at the
+# `vikunja-db` service hostname.
+#
+# Vikunja has its own multi-user auth and is exposed publicly via Caddy (the site
+# block lives in services/reverse-proxy/Caddyfile). Self-registration is disabled
+# (VIKUNJA_SERVICE_ENABLEREGISTRATION) so the admin provisions family accounts; see
+# the first-run notes in README.md for creating the first admin via the CLI.
+#
+# Persistent state lives on ZFS-backed appdata so it survives container recreation:
+# the Postgres data directory and Vikunja's task-attachment files.
+name: vikunja
+
+services:
+  vikunja:
+    container_name: vikunja
+    image: vikunja/vikunja:2.3.0@sha256:f6b80393c1998cd5cd0dc38d24762c59ab4c10000a6f1032ef5b554e262cab93
+    restart: unless-stopped
+    # The image defaults to UID 1000, but Docker creates the bind-mount source dirs as root, so
+    # 1000 couldn't write task attachments. Run as root (like the postgres/forgejo/immich
+    # containers in these privileged LXCs) so the attachments dir is writable with no manual chown.
+    user: '0:0'
+    environment:
+      - TZ=${TZ}
+      # Public-facing URL the browser uses to reach the API; must match the Caddy site.
+      - VIKUNJA_SERVICE_PUBLICURL=https://${VIKUNJA_FQDN}/
+      # Secret used to sign user-auth JWTs (Vikunja's service.secret). Keep it stable —
+      # rotating it invalidates every issued session token.
+      - VIKUNJA_SERVICE_SECRET=${VIKUNJA_JWT_SECRET}
+      # Family instance: no public self-registration. The admin provisions each account
+      # (see README first-run notes — accounts are created with `vikunja user create`).
+      - VIKUNJA_SERVICE_ENABLEREGISTRATION=${VIKUNJA_ENABLE_REGISTRATION}
+      - VIKUNJA_DATABASE_TYPE=postgres
+      - VIKUNJA_DATABASE_HOST=vikunja-db
+      - VIKUNJA_DATABASE_DATABASE=${VIKUNJA_DB_NAME}
+      - VIKUNJA_DATABASE_USER=${VIKUNJA_DB_USERNAME}
+      - VIKUNJA_DATABASE_PASSWORD=${VIKUNJA_DB_PASSWORD}
+    volumes:
+      # Task attachments, persisted on ZFS-backed appdata.
+      - ${DOCKER_APPDATA_ROOT}/vikunja/files:/app/vikunja/files
+      - /etc/localtime:/etc/localtime:ro
+    ports:
+      - '${VIKUNJA_HTTP_PORT}:3456'
+    depends_on:
+      vikunja-db:
+        condition: service_healthy
+    # The image is built FROM scratch (just the Go binary, no shell), so there is no
+    # in-container command for a Docker healthcheck. Startup ordering is instead gated on
+    # the database being healthy via depends_on above.
+
+  vikunja-db:
+    container_name: vikunja-db
+    image: postgres:18@sha256:4aabea78cf39b90e834caf3af7d602a18565f6fe2508705c8d01aa63245c2e20
+    restart: unless-stopped
+    environment:
+      - TZ=${TZ}
+      - POSTGRES_DB=${VIKUNJA_DB_NAME}
+      - POSTGRES_USER=${VIKUNJA_DB_USERNAME}
+      - POSTGRES_PASSWORD=${VIKUNJA_DB_PASSWORD}
+    volumes:
+      # Postgres 18 stores its data under /var/lib/postgresql/<major>/docker; mount the
+      # parent so the data directory persists across container recreation and majors.
+      - ${DOCKER_APPDATA_ROOT}/vikunja/db:/var/lib/postgresql
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -h localhost -U $$POSTGRES_USER']
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s

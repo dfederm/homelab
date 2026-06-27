@@ -44,3 +44,8 @@
 {$OPEN_WEBUI_FQDN} {
 	reverse_proxy localhost:{$OPEN_WEBUI_HTTP_PORT}
 }
+
+# Vikunja - Task management
+{$VIKUNJA_FQDN} {
+	reverse_proxy localhost:{$VIKUNJA_HTTP_PORT}
+}

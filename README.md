@@ -51,6 +51,7 @@ All data lives on a ZFS pool and is bind-mounted into containers. The LXC root f
     ├── photos/            # Immich
     ├── reverse-proxy/     # Caddy
     ├── scrutiny/          # Drive SMART health (web UI + InfluxDB)
+    ├── vikunja/           # Vikunja task management (+ Postgres)
     ├── webhook/           # CI/CD webhook receiver
     └── zwave/             # Z-Wave JS UI
 ```
@@ -397,6 +398,32 @@ persists on `${DOCKER_APPDATA_ROOT}/searxng` (ZFS-backed).
   values — read on first launch then managed in the UI/DB, so changing them later requires
   re-seeding (wiping the Open WebUI data) or toggling them in Admin Settings → Web Search.
 - SearXNG deploys as part of the `ai` service — no separate `HOMELAB_SERVICES` entry is needed.
+
+### Vikunja (task management)
+
+`services/vikunja/` runs [Vikunja](https://vikunja.io), the self-hosted task manager, as a
+single compose project: the merged API/web `vikunja` container plus a dedicated `vikunja-db`
+Postgres container. They share the project's default network, so Vikunja reaches the database
+at the `vikunja-db` hostname. Both the Postgres data directory and Vikunja's task-attachment
+files persist under `${DOCKER_APPDATA_ROOT}/vikunja/` (ZFS-backed).
+
+Vikunja has its own multi-user auth, so it is exposed via Caddy at `VIKUNJA_FQDN` and is also
+reachable on the LAN at `http://<docker-host-ip>:${VIKUNJA_HTTP_PORT}`. DB credentials and the
+JWT signing secret (`VIKUNJA_DB_USERNAME`, `VIKUNJA_DB_PASSWORD`, `VIKUNJA_JWT_SECRET`) are
+secrets and are set in the env file of the machine running the service, never in the repo.
+
+First-run setup notes:
+- **Create the family accounts.** Self-registration is disabled
+  (`VIKUNJA_ENABLE_REGISTRATION=false`), so provision each account with the CLI inside the
+  running container. Omit `-p` to be prompted for the password interactively, or pass it
+  explicitly; the password is set at creation time (there is no first-login setup step):
+  ```bash
+  docker exec -it vikunja /app/vikunja/vikunja user create -u <username> -e <email>
+  ```
+  In this version user administration (create / list / disable / delete) is done through the
+  `vikunja user` CLI — there is no in-app admin role. To allow temporary self-registration
+  instead, set `VIKUNJA_ENABLE_REGISTRATION=true`, redeploy, register, then set it back to
+  `false`.
 
 ### Multi-instance services
 
