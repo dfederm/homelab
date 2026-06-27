@@ -21,6 +21,14 @@
         server: my-docker
         container: filestash
 
+- AI:
+    - Open WebUI:
+        icon: open-webui.png
+        href: "{{HOMEPAGE_VAR_CHAT_URL}}"
+        description: AI assistant
+        server: my-docker
+        container: open-webui
+
 - Infrastructure:
     - Home Assistant:
         icon: home-assistant.png

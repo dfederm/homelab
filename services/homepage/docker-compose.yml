@@ -14,6 +14,7 @@ services:
       # Derived from existing env vars so we don't duplicate URLs
       - HOMEPAGE_VAR_ADGUARD_URL=http://${ADGUARDHOME_IP}:${ADGUARDHOME_WEB_PORT}
       - HOMEPAGE_VAR_BESZEL_URL=http://${DOCKER_HOST_IP}:${BESZEL_WEB_PORT}
+      - HOMEPAGE_VAR_CHAT_URL=https://${OPEN_WEBUI_FQDN}
       - HOMEPAGE_VAR_DOZZLE_URL=http://${DOCKER_HOST_IP}:${DOZZLE_WEB_PORT}
       - HOMEPAGE_VAR_FILES_URL=https://${FILES_FQDN}
       - HOMEPAGE_VAR_FORGEJO_URL=https://${FORGEJO_FQDN}
