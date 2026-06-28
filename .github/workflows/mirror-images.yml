@@ -16,10 +16,9 @@
 #
 # Versions are NOT pinned here: the workflow always mirrors the newest stable
 # upstream release, and Renovate pins the exact version+digest in the compose
-# files (so there is no need to bump a version here first). One-time admin per
-# mirrored package, after the first successful run: make the ghcr package public
-# (GitHub -> Packages -> <pkg> -> Package settings -> Change visibility -> Public)
-# so the homelab pulls it with no `docker login`.
+# files (so there is no need to bump a version here first). Mirrored packages
+# inherit this public repo's visibility, so they are public and the homelab
+# pulls them with no `docker login` -- no manual visibility change needed.
 
 name: Mirror images to ghcr
 
