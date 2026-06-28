@@ -1,0 +1,41 @@
+# Forgejo Actions runner configuration (the official forgejo-runner, ghcr-mirrored) — consumed by
+# the forgejo-runner service in docker-compose.yml (passed via --config to both `register` and
+# `daemon`). Mounted read-only. Derived from `forgejo-runner generate-config` and trimmed to the
+# values that matter here. Labels live here so they are authoritative on every daemon restart (the
+# daemon falls back to the .runner file's labels only when this list is empty).
+
+log:
+  level: info
+
+runner:
+  # Where the registration result is stored, relative to the working dir (/data) => /data/.runner.
+  file: .runner
+  # One job at a time — this homelab runs light CI.
+  capacity: 1
+  # Per-job ceiling; jobs here run in minutes, not hours.
+  timeout: 3h
+  # A label maps a workflow `runs-on:` value to the backend that runs the job. The form is
+  # `<runs-on>:docker://<image>`: `docker` jobs run in a Docker container, and the image after
+  # `docker://` is only the FALLBACK used when a job omits its own `container:` (a CI job that sets
+  # its own `container:` runs in that instead). This MUST match the workflow's `runs-on:` exactly or
+  # jobs queue forever.
+  labels:
+    - "docker:docker://node:20-bookworm"
+
+cache:
+  # No workflow here uses actions/cache; disabling avoids the internal cache server and its
+  # job-container reachability caveats. Enable later if a workflow needs actions/cache.
+  enabled: false
+
+container:
+  # Empty => the runner creates a fresh per-job bridge network (recommended).
+  network: ""
+  # Job containers are unprivileged; the build needs no Docker-in-Docker.
+  privileged: false
+  # Disallow job containers from bind-mounting arbitrary host paths.
+  valid_volumes: []
+  # "-" => do NOT mount a Docker socket inside the job containers (jobs here don't need Docker). The
+  # runner still spawns those job containers via the host socket mounted in docker-compose.yml.
+  docker_host: "-"
+  # Always pull job base images so builds use current images.
+  force_pull: true

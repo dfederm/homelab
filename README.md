@@ -42,7 +42,7 @@ All data lives on a ZFS pool and is bind-mounted into containers. The LXC root f
     ├── dns/               # AdGuard Home
     ├── dozzle/            # Docker log viewer
     ├── files/             # Filestash + Collabora
-    ├── forgejo/           # Forgejo git hosting
+    ├── forgejo/           # Forgejo git hosting + Actions CI runner
     ├── homepage/          # Landing page dashboard
     ├── jellyfin/          # Media streaming
     ├── minecraft/         # Minecraft Bedrock servers (multi-world)
@@ -482,6 +482,41 @@ file kept **off the repo** on the NAS. The repo ships a name-free template:
 - The Caddy block adds the **CalDAV/CardDAV `.well-known` redirects** (`/.well-known/caldav`
   and `/.well-known/carddav` → `/`) so clients can auto-discover the DAV root from the bare
   domain (e.g. adding a CalDAV account on iOS with just the server hostname).
+
+### Forgejo (git hosting + Actions runner)
+
+`services/forgejo/` runs the Forgejo git host and a co-located **Actions CI runner** (the
+`forgejo-runner` container) in one compose project, so Forgejo repos can run Actions workflows and
+publish container images to Forgejo's built-in OCI registry. The runner has no purpose without the
+git host, so the two ship and deploy together (like SearXNG within the `ai` stack). Being in the
+same project, the runner reaches Forgejo over the internal network at `http://forgejo:3000` (no
+public-FQDN NAT hairpin, no TLS); it uses the host Docker socket to spawn each job's container (the
+same socket precedent as `services/webhook`).
+
+Both the git host and the runner use the **genuine official** Forgejo images, pulled from our own
+ghcr mirror (`ghcr.io/dfederm/homelab/forgejo` and `…/forgejo-runner`). The upstream Forgejo
+registries (`codeberg.org`, `code.forgejo.org`) are unreachable from this network — the
+Comcast/Hetzner routing issue — and the runner has no third-party mirror anywhere, so rather than
+trust a third-party Docker Hub mirror we mirror the official images to ghcr ourselves via
+[`.github/workflows/mirror-images.yml`](.github/workflows/mirror-images.yml) (GitHub-hosted runners
+reach the upstreams; the homelab reaches ghcr). The official runner image is a bare binary with no
+auto-registration wrapper, so the compose `command` registers once on first start and then runs the
+daemon.
+
+Runner labels (which `runs-on:` values it serves) are defined in the committed, read-only
+`services/forgejo/runner-config.yaml` rather than via an env var, so they are authoritative on
+every restart. The default label is `docker`, backed by the Docker backend. The registration
+state persists at `${DOCKER_APPDATA_ROOT}/forgejo-runner/.runner`, so the runner survives
+container recreation without re-registering.
+
+**Operator setup (one-time) is documented in
+[`services/forgejo/README.md`](services/forgejo/README.md)** — generating the registration token,
+creating the package access tokens, the secrets to add, and enabling Actions on a repo. After
+editing `runner-config.yaml`, restart just the runner so it is re-read (this avoids bouncing the
+git host):
+```bash
+docker restart forgejo-runner
+```
 
 ### Multi-instance services
 

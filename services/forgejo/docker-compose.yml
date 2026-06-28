@@ -1,10 +1,11 @@
 services:
   forgejo:
     container_name: forgejo
-    # Official image (Codeberg registry) — using Docker Hub mirror due to
-    # Comcast/Hetzner routing issues preventing pulls from codeberg.org
-    # image: codeberg.org/forgejo/forgejo:14.0.3@sha256:8f4b1f86750e206824c669e1af17b6c6e8da9ed1a8ebda615db7526ee86d3eb2
-    image: forgejoclone/forgejo:15.0.3@sha256:4ac77d131a6cea2d0023561b0638857bdf863394f83b9bdc6ba5fe426c2e5f62
+    # The official Forgejo image (codeberg.org/forgejo/forgejo) is unreachable from this network
+    # (Comcast/Hetzner routing), so we pull it from our own ghcr mirror of the genuine upstream image
+    # — synced by .github/workflows/mirror-images.yml — rather than trusting a third-party Docker Hub
+    # mirror. Renovate pins the exact version + digest here.
+    image: ghcr.io/dfederm/homelab/forgejo:15.0.3@sha256:55bb42bec9abef5223744804f164e37d37b20df7e8b8b4807ba213ad4f071d6d
     restart: unless-stopped
     environment:
       - TZ=${TZ}
@@ -20,3 +21,59 @@ services:
     ports:
       - '${FORGEJO_HTTP_PORT}:3000'
       - '${FORGEJO_SSH_PORT}:22'
+
+  # Forgejo Actions CI runner — part of the Forgejo stack (it has no purpose without the git host
+  # above), so it ships in this same compose project. Being in the project, it reaches Forgejo over
+  # the internal network at http://forgejo:3000 (no public-FQDN NAT hairpin, no TLS).
+  #
+  # This is the genuine official Forgejo runner, pulled from our own ghcr mirror (the upstream
+  # code.forgejo.org registry is unreachable from this network; .github/workflows/mirror-images.yml
+  # syncs it). Unlike convenience images, the official image's entrypoint is the bare binary with no
+  # auto-registration wrapper, so the command below does a one-time `register` (only when
+  # /data/.runner is absent — it retries until Forgejo is reachable) and then execs the daemon.
+  # `register` is deprecated upstream in favour of the config `server.connections` model, but the
+  # registration-token flow is the simplest operator experience and still works; revisit on a major
+  # bump. The image defaults to a non-root user, but the job-spawning Docker socket below is
+  # root:996 and already grants host-root-equivalent power regardless of the process uid, so we run
+  # as root to access the socket and own the /data bind mount — no marginal risk, and it avoids a
+  # uid-1000 perms dance on both.
+  forgejo-runner:
+    container_name: forgejo-runner
+    image: ghcr.io/dfederm/homelab/forgejo-runner:12.12.0@sha256:268ad0d1d24bd7ecf2386b7c44e8211398dc014ca81d4fd5fbad96fe79af18f5
+    restart: unless-stopped
+    user: "0:0"
+    depends_on:
+      - forgejo
+    environment:
+      - TZ=${TZ}
+      # Consumed by the one-time register step below (first deploy only). After registration the
+      # persistent per-runner credential lives in /data/.runner and the token is no longer read.
+      - FORGEJO_RUNNER_TOKEN=${FORGEJO_RUNNER_TOKEN}
+      - FORGEJO_RUNNER_NAME=${FORGEJO_RUNNER_NAME}
+    # Register once (creates /data/.runner), then run the daemon. `$$VAR` escapes Compose
+    # interpolation so the values are read from the container env at runtime, keeping the token out
+    # of the compose file. Labels come from the mounted config (passed via --config to register), so
+    # they stay authoritative on every daemon restart.
+    entrypoint: ['/bin/sh', '-c']
+    command:
+      - |
+        set -e
+        if [ ! -s /data/.runner ]; then
+          forgejo-runner register --no-interactive \
+            --config /etc/forgejo-runner/config.yaml \
+            --instance http://forgejo:3000 \
+            --token "$$FORGEJO_RUNNER_TOKEN" \
+            --name "$$FORGEJO_RUNNER_NAME"
+        fi
+        exec forgejo-runner daemon --config /etc/forgejo-runner/config.yaml
+    volumes:
+      # Persist the registration (.runner) so it survives container recreation — no re-register.
+      - ${DOCKER_APPDATA_ROOT}/forgejo-runner:/data
+      # Declarative runner config, mounted read-only like the Caddyfile (services/reverse-proxy) and
+      # settings.yml (services/ai/searxng). After editing it, restart just the runner to re-read it:
+      # `docker restart forgejo-runner` (a content-only change to a bind-mounted file needs only a
+      # process restart, and this avoids bouncing the git host).
+      - ./runner-config.yaml:/etc/forgejo-runner/config.yaml:ro
+      # The runner uses the host Docker socket to spawn each job's container (same precedent as
+      # services/webhook); the socket is only for the per-job container, not for the build itself.
+      - /var/run/docker.sock:/var/run/docker.sock
