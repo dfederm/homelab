@@ -452,10 +452,13 @@ events, so a tool like Athena can read who's involved. The rights are:
 
 - Each user owns their personal calendars/address books under `/<user>/`.
 - A **shared family calendar** lives at `/family/` — adults read+write, kids read-only by
-  default. The vast majority of household events go here; an adult creates it once (e.g. a
-  `MKCALENDAR` to `https://<RADICALE_FQDN>/family/<name>/`), then every device subscribes to
-  that URL (CalDAV auto-discovery only surfaces a user's *own* collections, so the shared one
-  is added by URL once per device).
+  default. The vast majority of household events go here; an adult creates it once. Because
+  `/family/` is not a user principal, Radicale does not auto-create it, so make the parent
+  collection first and then the calendar (a one-step `MKCALENDAR` on the nested path returns
+  409): `MKCOL https://<RADICALE_FQDN>/family/` then
+  `MKCALENDAR https://<RADICALE_FQDN>/family/<name>/`. Every device then subscribes to that
+  calendar URL (CalDAV auto-discovery only surfaces a user's *own* collections, so the shared
+  one is added by URL once per device).
 - Adults can read every member's personal calendars; kids cannot see others' personal
   calendars by default.
 
