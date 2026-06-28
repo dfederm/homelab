@@ -14,9 +14,11 @@
 # persist on ${DOCKER_APPDATA_ROOT}/radicale (ZFS-backed) so they survive container recreation.
 #
 # The container runs hardened per the image's recommended production recipe: read-only root
-# filesystem, all Linux capabilities dropped except the few the entrypoint needs (CHOWN to fix the
-# data-dir owner, SETUID/SETGID to drop to the unprivileged radicale user, KILL to stop), and
-# no-new-privileges. Radicale itself already runs as a non-root user.
+# filesystem, all Linux capabilities dropped except the few needed to drop to the unprivileged
+# radicale user (SETUID/SETGID) and stop it (KILL), and no-new-privileges. Radicale runs as a
+# non-root user (uid 2999); its data dir is created and owned host-side by pre-up.sh (see
+# TAKE_FILE_OWNERSHIP below), so the image's startup chown — and the CHOWN capability — are not
+# needed.
 services:
   radicale:
     container_name: radicale
@@ -29,7 +31,6 @@ services:
     cap_drop:
       - ALL
     cap_add:
-      - CHOWN
       - SETUID
       - SETGID
       - KILL
@@ -37,6 +38,11 @@ services:
       - "${RADICALE_HTTP_PORT}:5232"
     environment:
       - TZ=${TZ}
+      # Disable the image's startup `chown -R radicale:radicale /data`. Under this container's
+      # dropped capabilities it cannot chown bind-mounted ZFS files to the radicale uid (EPERM)
+      # and would crash-loop. The data dir is instead created and owned (uid 2999) host-side by
+      # services/radicale/pre-up.sh, where root can chown freely.
+      - TAKE_FILE_OWNERSHIP=false
     volumes:
       # Committed Radicale config (filesystem storage, htpasswd+bcrypt auth, from_file rights).
       - ./config:/config/config:ro
@@ -51,9 +57,10 @@ services:
       # Collections (calendars + address books) persist on ZFS-backed appdata.
       - ${DOCKER_APPDATA_ROOT}/radicale:/data
     healthcheck:
-      # Radicale requires auth, so an unauthenticated request to / returns 401 — treat both 200
-      # and 401 as "the server is up and answering" (a down server yields no/erroring response).
-      test: ["CMD-SHELL", "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:5232/ | grep -qE '^(200|401)$$'"]
+      # "Is the server answering?" On this image an unauthenticated GET / returns 302 (redirect to
+      # the /.web UI); auth-required collection paths return 401; some paths return 200. Treat any
+      # of these as up — a down server yields no/erroring response (curl exits non-zero).
+      test: ["CMD-SHELL", "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:5232/ | grep -qE '^(200|302|401)$$'"]
       interval: 30s
       timeout: 5s
       retries: 3
