@@ -561,6 +561,16 @@ HOMELAB_SETUP_MODULES="create-users install-tools install-docker"
 
 Docker images are pinned to specific versions with SHA256 digests for reproducibility. [Renovate Bot](https://docs.renovatebot.com/) automatically opens PRs when new versions are available, so updates are reviewed before deployment.
 
+### Self-mirrored images (ghcr)
+
+A few upstream registries are unreachable from this network due to upstream routing problems (notably Forgejo's `codeberg.org` and `code.forgejo.org`, which time out from this ISP). Rather than depend on an unverified third-party Docker Hub mirror, the [`mirror-images`](.github/workflows/mirror-images.yml) GitHub Actions workflow copies the genuinely-official images to `ghcr.io/dfederm/homelab/*` (GitHub-hosted runners can reach the upstream registries; the homelab can reach ghcr). The compose files then pull from ghcr.
+
+The workflow runs weekly and on demand (`workflow_dispatch`). For each image in its matrix it picks the newest stable upstream release, copies the full multi-arch manifest with `skopeo copy --all` (preserving the official digest), and prints the pinnable `@sha256` ref in its run summary. Versions are not pinned in the workflow — it always mirrors the newest stable release, and Renovate pins the exact version+digest in the compose files (so a version bump never needs a workflow edit first). To mirror another image, add a row to the workflow's matrix.
+
+One-time admin per mirrored package: after the first successful run, make the ghcr package public (GitHub → Packages → *package* → Package settings → Change visibility → Public) so the homelab pulls it without authentication. Renovate then tracks the ghcr ref like any other image and opens version/digest bump PRs.
+
+> **Merge ordering matters.** When first repointing a compose image at a self-mirrored ghcr ref, run the workflow and make the package public *before* merging the compose change — and set the compose tag to the version the run actually published (shown in its summary; the workflow mirrors the newest stable upstream release, which may differ from the tag currently in compose). Deploys pull the image (`docker compose pull`) — merging a tag that was never mirrored would point a live service at an image that does not exist yet and fail its next deploy. After bootstrap, Renovate keeps the compose tag and the published ghcr tags in sync.
+
 ## CI/CD
 
 Pushes to `main` are automatically deployed via a [webhook receiver](https://github.com/adnanh/webhook) running in the Docker LXC. The Docker LXC acts as the deployment coordinator — it pulls the latest code centrally, then fans out to all machines via SSH.

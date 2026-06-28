@@ -1,0 +1,101 @@
+# Mirror official upstream images to ghcr.io/dfederm/homelab/*.
+#
+# Some upstream registries are unreachable from the homelab network because of
+# upstream routing problems (Forgejo's codeberg.org / code.forgejo.org time out
+# from this ISP). GitHub-hosted runners reach them fine, and the homelab reaches
+# ghcr.io, so this workflow copies the genuinely-official images to ghcr for the
+# compose files to pull from instead of trusting third-party Docker Hub mirrors.
+#
+# To mirror another problem image, add a row to the matrix below. Each run:
+#   - lists the upstream tags (proves reachability),
+#   - picks the newest stable X.Y.Z tag (upstream publishes no `latest`),
+#   - copies the full multi-arch manifest with `skopeo copy --all` (the manifest
+#     digest is preserved, so the printed @sha256 is what compose should pin),
+#   - prints the image's entrypoint/user/env config so the compose `environment:`
+#     mapping can match what the image actually reads.
+#
+# Versions are NOT pinned here: the workflow always mirrors the newest stable
+# upstream release, and Renovate pins the exact version+digest in the compose
+# files (so there is no need to bump a version here first). One-time admin per
+# mirrored package, after the first successful run: make the ghcr package public
+# (GitHub -> Packages -> <pkg> -> Package settings -> Change visibility -> Public)
+# so the homelab pulls it with no `docker login`.
+
+name: Mirror images to ghcr
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Weekly, Monday 05:00 UTC -- re-mirror so ghcr tracks upstream releases.
+    - cron: '0 5 * * 1'
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  # Registry namespace all mirrored images are pushed under. Change in one place.
+  REGISTRY: ghcr.io/dfederm/homelab
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: forgejo
+            source: codeberg.org/forgejo/forgejo
+          - image: forgejo-runner
+            source: code.forgejo.org/forgejo/runner
+    steps:
+      - name: Ensure skopeo is installed
+        run: command -v skopeo >/dev/null 2>&1 || { sudo apt-get update && sudo apt-get install -y skopeo; }
+
+      - name: Log in to ghcr.io
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+        run: echo "$GHCR_TOKEN" | skopeo login ghcr.io -u "$GHCR_USER" --password-stdin
+
+      - name: Mirror newest stable ${{ matrix.source }} to ${{ env.REGISTRY }}/${{ matrix.image }}
+        run: |
+          set -euo pipefail
+          target="${REGISTRY}/${{ matrix.image }}"
+
+          # List upstream tags (also proves the GH runner can reach the registry).
+          {
+            echo "### ${{ matrix.source }} -- available upstream tags"
+            echo '```'
+            skopeo list-tags "docker://${{ matrix.source }}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # Pick the newest stable release: exact X.Y.Z only, so floating tags
+          # (e.g. major `15`), pre-releases and `nightly` are excluded.
+          tag="$(skopeo list-tags "docker://${{ matrix.source }}" \
+            | jq -r '.Tags[]' \
+            | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' \
+            | sort -V | tail -n1)"
+          echo "Newest stable tag: ${tag}"
+
+          src="docker://${{ matrix.source }}:${tag}"
+          dst="docker://${target}:${tag}"
+          echo "Copying $src -> $dst"
+          skopeo copy --all "$src" "$dst"
+
+          # `--all` preserves the manifest-list bytes, so this digest is identical
+          # to the official upstream digest -- pin it in docker-compose as @sha256.
+          # Hash the raw manifest bytes to get the manifest-LIST (index) digest, not
+          # the per-arch child that `skopeo inspect --format {{.Digest}}` resolves to.
+          digest="sha256:$(skopeo inspect --raw "$dst" | sha256sum | cut -d' ' -f1)"
+
+          {
+            echo "### Mirrored ${target}"
+            echo "- pinnable ref: \`${target}:${tag}@${digest}\`"
+            echo ""
+            echo "Image config (entrypoint / user / env contract):"
+            echo '```json'
+            skopeo inspect --config "$dst" | jq '.config | {User, Entrypoint, Cmd, WorkingDir, Env}'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
