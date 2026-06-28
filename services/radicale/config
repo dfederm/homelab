@@ -1,0 +1,26 @@
+# Radicale configuration (mounted read-only at /config/config).
+# Declarative and secret-free — the htpasswd file it points at lives off this public repo
+# (see services/radicale/docker-compose.yml and .env.template).
+
+[server]
+# Listen on all interfaces inside the container; Caddy terminates TLS in front of it.
+hosts = 0.0.0.0:5232
+
+[auth]
+# Own-auth holdout: HTTP Basic against an htpasswd file with bcrypt hashes. The file is a
+# SECRET, mounted from the NAS at /config/users (never committed). Generate entries with
+# `htpasswd -B` (see .env.template).
+type = htpasswd
+htpasswd_filename = /config/users
+htpasswd_encryption = bcrypt
+
+[storage]
+# Collections (calendars + address books) live under the ZFS-backed /data volume.
+filesystem_folder = /data/collections
+
+[rights]
+# Per-user privacy plus a shared family calendar. The rules map usernames to collection
+# paths, so they live in a separate rights file that — like the htpasswd file — is kept off
+# this public repo and mounted from the NAS at /config/rights. See services/radicale/rights.example.
+type = from_file
+file = /config/rights

@@ -1,0 +1,65 @@
+# Radicale — self-hosted CalDAV/CardDAV server: the homelab's calendar (VEVENT) and contacts
+# (VCARD) store. Family devices sync to it with standard CalDAV/CardDAV clients (Apple
+# Calendar/Contacts, DAVx5 on Android, Thunderbird).
+#
+# Auth is Radicale's OWN htpasswd (bcrypt) — deliberately NOT behind Authelia/forward-auth.
+# Native CalDAV/CardDAV clients authenticate with HTTP Basic auth, which a forward-auth layer
+# would break, so Radicale stays an own-auth holdout. It is still exposed publicly via Caddy
+# (site block + .well-known auto-discovery redirects in services/reverse-proxy/Caddyfile), so the
+# per-user credentials must be strong.
+#
+# Config is declarative: the committed ./config file is mounted read-only. The htpasswd file is a
+# SECRET, so it is NOT committed — it lives on the NAS at ${CONFIG_DIR}/radicale/users (bcrypt
+# hashes, next to the machine env files) and is mounted read-only at /config/users. Collections
+# persist on ${DOCKER_APPDATA_ROOT}/radicale (ZFS-backed) so they survive container recreation.
+#
+# The container runs hardened per the image's recommended production recipe: read-only root
+# filesystem, all Linux capabilities dropped except the few the entrypoint needs (CHOWN to fix the
+# data-dir owner, SETUID/SETGID to drop to the unprivileged radicale user, KILL to stop), and
+# no-new-privileges. Radicale itself already runs as a non-root user.
+services:
+  radicale:
+    container_name: radicale
+    image: tomsquest/docker-radicale:3.7.5.0@sha256:e4e694f859c5580c8e925d15905cae36b378150b43ab9b71c52f9cfeed4a3906
+    restart: unless-stopped
+    init: true
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+      - KILL
+    ports:
+      - "${RADICALE_HTTP_PORT}:5232"
+    environment:
+      - TZ=${TZ}
+    volumes:
+      # Committed Radicale config (filesystem storage, htpasswd+bcrypt auth, from_file rights).
+      - ./config:/config/config:ro
+      # htpasswd file (bcrypt hashes) — a SECRET kept OFF this public repo, on the NAS config dir.
+      # It MUST exist before deploying: a missing bind-mount source is created by Docker as an
+      # empty directory, which would break Radicale (htpasswd_filename would point at a dir).
+      - ${CONFIG_DIR}/radicale/users:/config/users:ro
+      # Rights file (maps usernames -> collection access). Also kept OFF the public repo since it
+      # contains family member names; lives on the NAS config dir, mounted read-only. Like the
+      # htpasswd file it MUST exist before deploying. See services/radicale/rights.example.
+      - ${CONFIG_DIR}/radicale/rights:/config/rights:ro
+      # Collections (calendars + address books) persist on ZFS-backed appdata.
+      - ${DOCKER_APPDATA_ROOT}/radicale:/data
+    healthcheck:
+      # Radicale requires auth, so an unauthenticated request to / returns 401 — treat both 200
+      # and 401 as "the server is up and answering" (a down server yields no/erroring response).
+      test: ["CMD-SHELL", "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:5232/ | grep -qE '^(200|401)$$'"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

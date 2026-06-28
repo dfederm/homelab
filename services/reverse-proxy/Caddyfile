@@ -49,3 +49,12 @@
 {$VIKUNJA_FQDN} {
 	reverse_proxy localhost:{$VIKUNJA_HTTP_PORT}
 }
+
+# Radicale - CalDAV/CardDAV (calendar + contacts). The .well-known redirects let clients
+# auto-discover the DAV root from the bare domain (e.g. iOS adding a CalDAV account with just
+# the server hostname).
+{$RADICALE_FQDN} {
+	redir /.well-known/carddav / permanent
+	redir /.well-known/caldav / permanent
+	reverse_proxy localhost:{$RADICALE_HTTP_PORT}
+}

@@ -1,0 +1,77 @@
+# Radicale rights file — EXAMPLE / template.
+#
+# Referenced by services/radicale/config: `[rights] type = from_file`, `file = /config/rights`.
+# It maps usernames to collection paths, so it contains real family member names. Like the
+# htpasswd `users` file, it is therefore kept OFF this public repo: copy it to the NAS at
+# <config_dir>/radicale/rights, replace the placeholder usernames, and it is mounted read-only
+# into the container at /config/rights. It MUST exist before deploying.
+#
+# Format (https://radicale.org): each [section] is one named rule and the FIRST matching rule
+# wins. `user` is a regex (`.+` = any authenticated user); `collection` is a regex over the
+# collection path (no leading slash) and may use `{user}` for the logged-in name. Permission
+# letters:
+#   R = read collections, excluding calendars/address books (discovery/listing)
+#   r = read calendar / address-book collections (their items)
+#   W = write collections, excluding calendars/address books (create/manage)
+#   w = write calendar / address-book collections (their items)
+#
+# Roles below: replace `adult1|adult2` with the real adult usernames (e.g. `alice|bob`). Every
+# other authenticated user is treated as a "kid" by the catch-all rules. Do NOT create an
+# htpasswd user named `family` — it would collide with the shared family-calendar path below.
+
+# --- Discovery -------------------------------------------------------------------------------
+# Every authenticated user can read the root collection (needed for client auto-discovery).
+[root]
+user: .+
+collection:
+permissions: R
+
+# --- Personal calendars ----------------------------------------------------------------------
+# Each user fully owns their own principal collection and the calendars/address books in it.
+[own-principal]
+user: .+
+collection: {user}
+permissions: RW
+
+[own-collections]
+user: .+
+collection: {user}/[^/]+
+permissions: rw
+
+# --- Shared family calendar at /family/ ------------------------------------------------------
+# Adults read+write; everyone else (kids) read-only. These come BEFORE the adults-read-all
+# rules below so adults keep write access here. To let kids edit the family calendar too, give
+# the two [family-readonly*] rules `RW` / `rw`.
+[family-adults]
+user: adult1|adult2
+collection: family
+permissions: RW
+
+[family-adults-items]
+user: adult1|adult2
+collection: family/[^/]+
+permissions: rw
+
+[family-readonly]
+user: .+
+collection: family
+permissions: R
+
+[family-readonly-items]
+user: .+
+collection: family/[^/]+
+permissions: r
+
+# --- Adult oversight -------------------------------------------------------------------------
+# Adults can read every member's personal calendars. Kids find no match here, so they cannot
+# see other people's personal calendars (delete these two rules to also hide them from adults,
+# or add a kid-specific rule to expose only certain calendars).
+[adults-read-principals]
+user: adult1|adult2
+collection: [^/]+
+permissions: R
+
+[adults-read-items]
+user: adult1|adult2
+collection: [^/]+/[^/]+
+permissions: r

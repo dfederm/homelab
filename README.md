@@ -49,6 +49,7 @@ All data lives on a ZFS pool and is bind-mounted into containers. The LXC root f
     ├── monitoring/        # Beszel hub + Uptime Kuma
     ├── monitoring-agent/  # Beszel agent (runs on all hosts)
     ├── photos/            # Immich
+    ├── radicale/          # CalDAV/CardDAV (calendar + contacts)
     ├── reverse-proxy/     # Caddy
     ├── scrutiny/          # Drive SMART health (web UI + InfluxDB)
     ├── vikunja/           # Vikunja task management (+ Postgres)
@@ -424,6 +425,60 @@ First-run setup notes:
   `vikunja user` CLI — there is no in-app admin role. To allow temporary self-registration
   instead, set `VIKUNJA_ENABLE_REGISTRATION=true`, redeploy, register, then set it back to
   `false`.
+
+### Radicale (CalDAV/CardDAV)
+
+`services/radicale/` runs [Radicale](https://radicale.org), a self-hosted CalDAV/CardDAV
+server — the homelab's **calendar** (`VEVENT`) and **contacts** (`VCARD`) store. Family
+devices sync to it with standard clients (Apple Calendar/Contacts, DAVx⁵ on Android,
+Thunderbird). It uses the hardened [`tomsquest/docker-radicale`](https://github.com/tomsquest/docker-radicale)
+image (read-only root filesystem, all capabilities dropped except the few its entrypoint
+needs, no-new-privileges; runs as a non-root user).
+
+Radicale keeps its **own htpasswd auth** (bcrypt) and is deliberately **not** placed behind
+Authelia/forward-auth: native CalDAV/CardDAV clients authenticate with HTTP Basic auth, which
+a forward-auth layer would break. It **is** exposed publicly via Caddy at `RADICALE_FQDN`
+(site block in `services/reverse-proxy/Caddyfile`), so per-user credentials must be strong. It
+is also reachable on the LAN at `http://<docker-host-ip>:${RADICALE_HTTP_PORT}`.
+
+Config is declarative: `services/radicale/config` is mounted read-only (filesystem storage,
+htpasswd+bcrypt auth, `from_file` rights). Collections persist on
+`${DOCKER_APPDATA_ROOT}/radicale` (ZFS-backed).
+
+**Access model (personal calendars + one shared family calendar).** Radicale has no
+scheduling/attendee delivery (it is a store, not groupware), so sharing is by *shared
+collection*, not by inviting attendees — though `ATTENDEE` properties are still stored on
+events, so a tool like Athena can read who's involved. The rights are:
+
+- Each user owns their personal calendars/address books under `/<user>/`.
+- A **shared family calendar** lives at `/family/` — adults read+write, kids read-only by
+  default. The vast majority of household events go here; an adult creates it once (e.g. a
+  `MKCALENDAR` to `https://<RADICALE_FQDN>/family/<name>/`), then every device subscribes to
+  that URL (CalDAV auto-discovery only surfaces a user's *own* collections, so the shared one
+  is added by URL once per device).
+- Adults can read every member's personal calendars; kids cannot see others' personal
+  calendars by default.
+
+These rules map usernames to collections, so — like the htpasswd file — they live in a rights
+file kept **off the repo** on the NAS. The repo ships a name-free template:
+
+- The **htpasswd file is a secret** and is **not** committed. Create it on the NAS at
+  `<config_dir>/radicale/users` (mounted read-only at `/config/users`), one `user:bcrypt-hash`
+  per line. Generate entries with `htpasswd -B` (bcrypt) — `htpasswd -B -c .../users alice` for
+  the first user, then `htpasswd -B .../users bob` to append.
+- The **rights file** also contains usernames, so it is **not** committed either. Copy
+  `services/radicale/rights.example` to `<config_dir>/radicale/rights` (mounted read-only at
+  `/config/rights`), replacing the placeholder adult usernames. The example documents the
+  Radicale permission letters and the one-line tweaks for "kids can edit the family calendar"
+  or "hide personal calendars from everyone."
+- Both files **must exist before the first deploy** — Docker would otherwise create the missing
+  bind-mount source as a directory and break Radicale.
+- Radicale runs as a non-root user inside the container, so both files must be readable by
+  "other". `services/radicale/pre-up.sh` (run automatically on each deploy) enforces this
+  (`chmod o+r`) and aborts the deploy if either file is missing, so no manual `chmod` is needed.
+- The Caddy block adds the **CalDAV/CardDAV `.well-known` redirects** (`/.well-known/caldav`
+  and `/.well-known/carddav` → `/`) so clients can auto-discover the DAV root from the bare
+  domain (e.g. adding a CalDAV account on iOS with just the server hostname).
 
 ### Multi-instance services
 

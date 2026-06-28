@@ -43,6 +43,11 @@ if [ -n "$INSTANCES" ]; then
     COMMON_ENV="$CONFIG_DIR/common.env"
     cd "$SERVICEPATH"
     export BUILDX_NO_DEFAULT_ATTESTATIONS=1
+    # Optional pre-deploy hook (runs once before deploying), e.g. validate or fix file perms.
+    # CONFIG_DIR is exported by source_env. A non-zero exit aborts the deploy (set -e).
+    if [ -f "$SERVICEPATH/pre-up.sh" ]; then
+        bash "$SERVICEPATH/pre-up.sh" "$INSTANCES"
+    fi
     for INSTANCE in $INSTANCES; do
         echo ""
         echo "Deploying: $SERVICE ($INSTANCE)"
@@ -85,6 +90,12 @@ ENV_ARGS+=(--env-file "$ENV_FILE")
 # list digest even when layers are fully cached. Compose sees the new digest
 # as a changed image and recreates the container unnecessarily.
 export BUILDX_NO_DEFAULT_ATTESTATIONS=1
+
+# Optional pre-deploy hook (runs before compose up), e.g. validate or fix file perms.
+# CONFIG_DIR is exported by source_env. A non-zero exit aborts the deploy (set -e).
+if [ -f "$SERVICEPATH/pre-up.sh" ]; then
+    bash "$SERVICEPATH/pre-up.sh"
+fi
 
 docker compose "${ENV_ARGS[@]}" pull
 docker compose "${ENV_ARGS[@]}" up $FORCE --remove-orphans --build -d
