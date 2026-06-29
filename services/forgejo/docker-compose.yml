@@ -46,28 +46,26 @@ services:
       - forgejo
     environment:
       - TZ=${TZ}
-      # Consumed by the one-time register step below (first deploy only). After registration the
-      # persistent per-runner credential lives in /data/.runner and the token is no longer read.
+      # 40-char hex secret shared with Forgejo (registered once via forgejo-cli — see README).
+      # Read at runtime to build the connections config; never written to the compose file.
       - FORGEJO_RUNNER_TOKEN=${FORGEJO_RUNNER_TOKEN}
-      - FORGEJO_RUNNER_NAME=${FORGEJO_RUNNER_NAME}
-    # Pre-register once (creates /data/.runner from the runner's token), then run the daemon. The
-    # token from Forgejo's "Create new Runner" is a per-runner secret, so we use create-runner-file
-    # --connect (the register subcommand only accepts the legacy global registration token). `$$VAR`
-    # escapes Compose interpolation so the values are read from the container env at runtime, keeping
-    # the token out of the compose file. Labels come from the mounted config at daemon start.
+    # The official runner registers via the shared-secret "connections" model (a token from the
+    # Forgejo web UI canNOT be used). On start, derive the matching uuid from the secret, append a
+    # server.connections block to the committed config template, then run the daemon. `$$VAR` keeps
+    # the secret in the container env, out of the compose file; the generated config.yml lives in
+    # /data (not committed).
     entrypoint: ['/bin/sh', '-c']
     command:
       - |
         set -e
-        if [ ! -s /data/.runner ]; then
-          forgejo-runner create-runner-file --connect \
-            --instance http://forgejo:3000 \
-            --secret "$$FORGEJO_RUNNER_TOKEN" \
-            --name "$$FORGEJO_RUNNER_NAME"
-        fi
-        exec forgejo-runner daemon --config /etc/forgejo-runner/config.yaml
+        cfg=/data/config.yml
+        uuid=$$(printf %s "$$FORGEJO_RUNNER_TOKEN" | python3 -c 'import sys,uuid;print(uuid.UUID(bytes=sys.stdin.read()[:16].encode()))')
+        cat /etc/forgejo-runner/config.yaml > "$$cfg"
+        printf 'server:\n  connections:\n    homelab:\n      url: http://forgejo:3000\n      uuid: %s\n      token: %s\n' "$$uuid" "$$FORGEJO_RUNNER_TOKEN" >> "$$cfg"
+        exec forgejo-runner daemon --config "$$cfg"
     volumes:
-      # Persist the registration (.runner) so it survives container recreation — no re-register.
+      # Generated config.yml (carries the connection uuid/secret) persists here so it survives
+      # container recreation without re-registering.
       - ${DOCKER_APPDATA_ROOT}/forgejo-runner:/data
       # Declarative runner config, mounted read-only like the Caddyfile (services/reverse-proxy) and
       # settings.yml (services/ai/searxng). After editing it, restart just the runner to re-read it:
