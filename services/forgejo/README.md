@@ -109,8 +109,10 @@ Then confirm:
 ### Day-2 notes
 
 - **Re-register from scratch:** stop the runner and remove
-  `${DOCKER_APPDATA_ROOT}/forgejo-runner/.runner`, then redeploy with a fresh token. (Only needed if
-  the runner is deleted in Forgejo or the data is lost.)
+  `${DOCKER_APPDATA_ROOT}/forgejo-runner/.runner`, then redeploy with a fresh **Create new Runner**
+  token. (Needed if the runner is deleted in Forgejo, the data is lost, or logs show
+  `unauthenticated: unregistered runner` — the token is single-use, so a stale/used one must be
+  reset via Site Admin → Actions → Runners → Create new Runner.)
 - **Changing runner labels / backend:** edit `runner-config.yaml`, then restart just the runner so
   it is re-read — this avoids bouncing the git host:
   ```bash
