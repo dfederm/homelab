@@ -28,14 +28,11 @@ services:
   #
   # This is the genuine official Forgejo runner, pulled from our own ghcr mirror (the upstream
   # code.forgejo.org registry is unreachable from this network; .github/workflows/mirror-images.yml
-  # syncs it). Unlike convenience images, the official image's entrypoint is the bare binary with no
-  # auto-registration wrapper, so the command below does a one-time `register` (only when
-  # /data/.runner is absent — it retries until Forgejo is reachable) and then execs the daemon.
-  # `register` is deprecated upstream in favour of the config `server.connections` model, but the
-  # registration-token flow is the simplest operator experience and still works; revisit on a major
-  # bump. The image defaults to a non-root user, but the job-spawning Docker socket below is
-  # root:996 and already grants host-root-equivalent power regardless of the process uid, so we run
-  # as root to access the socket and own the /data bind mount — no marginal risk, and it avoids a
+  # syncs it). The official image is the bare binary, so the command below builds a connection
+  # config (uuid derived from the shared secret) and runs the daemon. The image defaults to a
+  # non-root user, but the job-spawning Docker socket below is root:996 and already grants
+  # host-root-equivalent power regardless of the process uid, so we run as root to access the
+  # socket and own the /data bind mount — no marginal risk, and it avoids a
   # uid-1000 perms dance on both.
   forgejo-runner:
     container_name: forgejo-runner

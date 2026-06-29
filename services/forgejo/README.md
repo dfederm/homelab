@@ -21,11 +21,10 @@ built-in OCI registry.
 - **Image:** the official `forgejo-runner`, via our ghcr mirror
   (`ghcr.io/dfederm/homelab/forgejo-runner`). The upstream `code.forgejo.org` registry is
   unreachable from this network and has no third-party mirror, so we mirror the genuine image to
-  ghcr ourselves. The official image is a bare binary (no auto-registration wrapper), so the compose
-  `command` registers once on first start (when `/data/.runner` is absent) and then runs the daemon.
-  See the comment block in `docker-compose.yml`.
-- **State:** the registration is stored at `${DOCKER_APPDATA_ROOT}/forgejo-runner/.runner` and
-  survives container recreation.
+  ghcr ourselves. The official image is a bare binary, so the compose `command` builds a connection
+  config from the shared secret and runs the daemon. See the comment block in `docker-compose.yml`.
+- **State:** the generated connection config persists at
+  `${DOCKER_APPDATA_ROOT}/forgejo-runner/config.yml` and survives container recreation.
 - **Labels:** defined in the read-only `runner-config.yaml` (authoritative on every restart). The
   default label is `docker`; a workflow opts in with `runs-on: docker`.
 
@@ -42,16 +41,22 @@ Sign in as admin and open `https://<FORGEJO_FQDN>/-/admin`:
 - The **Packages / container registry** is present (built-in, always on).
 - **Site Admin → Actions → Runners** shows **no runner yet** (this is what we're adding).
 
-#### 2. Generate the runner registration token
+#### 2. Register the runner with a shared secret
 
-- **Site Admin → Actions → Runners → "Create new Runner"** → copy the **registration token**.
+The runner uses the shared-secret model — a token from the web UI's "Create new Runner" does
+**not** work. Generate a 40-char hex secret, register it with Forgejo (idempotent), then store it:
+
+- Generate: `openssl rand -hex 20`.
+- Register it on the Forgejo side (in the Docker LXC), naming the runner:
+  ```bash
+  docker exec --user git forgejo forgejo forgejo-cli actions register --keep-labels --name <host> --secret <secret>
+  ```
 - On the NAS, add it to the Docker host's env file (e.g. `apollo.env`):
   ```
-  FORGEJO_RUNNER_NAME=<a name, e.g. the Docker host name>
-  FORGEJO_RUNNER_TOKEN=<token>
+  FORGEJO_RUNNER_TOKEN=<secret>
   ```
-  The token is consumed only on the runner's first start (it is swapped for a persistent credential
-  in `/data/.runner`); it is then a no-op and may be left set or cleared.
+  The runner derives the matching connection uuid from the secret and connects on start; nothing
+  is consumed, so re-deploys keep working.
 
 > No `HOMELAB_SERVICES` change is needed — the runner is part of the `forgejo` service, so it
 > deploys whenever `forgejo` does.
@@ -108,11 +113,9 @@ Then confirm:
 
 ### Day-2 notes
 
-- **Re-register from scratch:** stop the runner and remove
-  `${DOCKER_APPDATA_ROOT}/forgejo-runner/.runner`, then redeploy with a fresh **Create new Runner**
-  token. (Needed if the runner is deleted in Forgejo, the data is lost, or logs show
-  `unauthenticated: unregistered runner` — the token is single-use, so a stale/used one must be
-  reset via Site Admin → Actions → Runners → Create new Runner.)
+- **Re-register from scratch:** the secret is reusable — just re-run the `forgejo-cli actions
+  register` from step 2 (idempotent) and redeploy. The generated `/data/config.yml` rebuilds on
+  start; remove it (and any stale `.runner`) if you change the secret.
 - **Changing runner labels / backend:** edit `runner-config.yaml`, then restart just the runner so
   it is re-read — this avoids bouncing the git host:
   ```bash

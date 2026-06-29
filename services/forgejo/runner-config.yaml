@@ -1,15 +1,12 @@
-# Forgejo Actions runner configuration (the official forgejo-runner, ghcr-mirrored) — consumed by
-# the forgejo-runner service in docker-compose.yml (passed via --config to both `register` and
-# `daemon`). Mounted read-only. Derived from `forgejo-runner generate-config` and trimmed to the
-# values that matter here. Labels live here so they are authoritative on every daemon restart (the
-# daemon falls back to the .runner file's labels only when this list is empty).
+# Forgejo Actions runner configuration (the official forgejo-runner, ghcr-mirrored) — used as the
+# base template by the forgejo-runner service, which appends a server.connections block and passes
+# it to the daemon. Mounted read-only. Derived from `forgejo-runner generate-config` and trimmed to
+# the values that matter here. Labels live here so they are authoritative on every daemon restart.
 
 log:
   level: info
 
 runner:
-  # Where the registration result is stored, relative to the working dir (/data) => /data/.runner.
-  file: .runner
   # One job at a time — this homelab runs light CI.
   capacity: 1
   # Per-job ceiling; jobs here run in minutes, not hours.
