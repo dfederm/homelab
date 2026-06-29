@@ -50,8 +50,9 @@ services:
       # Read at runtime to build the connections config; never written to the compose file.
       - FORGEJO_RUNNER_TOKEN=${FORGEJO_RUNNER_TOKEN}
     # The official runner registers via the shared-secret "connections" model (a token from the
-    # Forgejo web UI canNOT be used). On start, derive the matching uuid from the secret, append a
-    # server.connections block to the committed config template, then run the daemon. `$$VAR` keeps
+    # Forgejo web UI canNOT be used). On start, derive the matching uuid from the secret's first 16
+    # bytes (pure shell — the image has no python), append a server.connections block to the
+    # committed config template, then run the daemon. `$$VAR` keeps
     # the secret in the container env, out of the compose file; the generated config.yml lives in
     # /data (not committed).
     entrypoint: ['/bin/sh', '-c']
@@ -59,7 +60,7 @@ services:
       - |
         set -e
         cfg=/data/config.yml
-        uuid=$$(printf %s "$$FORGEJO_RUNNER_TOKEN" | python3 -c 'import sys,uuid;print(uuid.UUID(bytes=sys.stdin.read()[:16].encode()))')
+        uuid=$$(printf %s "$$FORGEJO_RUNNER_TOKEN" | cut -c1-16 | od -An -tx1 | tr -d ' \n' | sed -E 's/(.{8})(.{4})(.{4})(.{4})(.{12}).*/\1-\2-\3-\4-\5/')
         cat /etc/forgejo-runner/config.yaml > "$$cfg"
         printf 'server:\n  connections:\n    homelab:\n      url: http://forgejo:3000\n      uuid: %s\n      token: %s\n' "$$uuid" "$$FORGEJO_RUNNER_TOKEN" >> "$$cfg"
         exec forgejo-runner daemon --config "$$cfg"
