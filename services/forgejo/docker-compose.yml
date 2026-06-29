@@ -50,19 +50,19 @@ services:
       # persistent per-runner credential lives in /data/.runner and the token is no longer read.
       - FORGEJO_RUNNER_TOKEN=${FORGEJO_RUNNER_TOKEN}
       - FORGEJO_RUNNER_NAME=${FORGEJO_RUNNER_NAME}
-    # Register once (creates /data/.runner), then run the daemon. `$$VAR` escapes Compose
-    # interpolation so the values are read from the container env at runtime, keeping the token out
-    # of the compose file. Labels come from the mounted config (passed via --config to register), so
-    # they stay authoritative on every daemon restart.
+    # Pre-register once (creates /data/.runner from the runner's token), then run the daemon. The
+    # token from Forgejo's "Create new Runner" is a per-runner secret, so we use create-runner-file
+    # --connect (the register subcommand only accepts the legacy global registration token). `$$VAR`
+    # escapes Compose interpolation so the values are read from the container env at runtime, keeping
+    # the token out of the compose file. Labels come from the mounted config at daemon start.
     entrypoint: ['/bin/sh', '-c']
     command:
       - |
         set -e
         if [ ! -s /data/.runner ]; then
-          forgejo-runner register --no-interactive \
-            --config /etc/forgejo-runner/config.yaml \
+          forgejo-runner create-runner-file --connect \
             --instance http://forgejo:3000 \
-            --token "$$FORGEJO_RUNNER_TOKEN" \
+            --secret "$$FORGEJO_RUNNER_TOKEN" \
             --name "$$FORGEJO_RUNNER_NAME"
         fi
         exec forgejo-runner daemon --config /etc/forgejo-runner/config.yaml
