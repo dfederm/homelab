@@ -25,8 +25,9 @@ cache:
   enabled: false
 
 container:
-  # Empty => the runner creates a fresh per-job bridge network (recommended).
-  network: ""
+  # Join the forgejo compose network so job containers can resolve the `forgejo`
+  # service by name (for git checkout over http://forgejo:3000 and the registry push).
+  network: "forgejo_default"
   # Job containers are unprivileged; the build needs no Docker-in-Docker.
   privileged: false
   # Disallow job containers from bind-mounting arbitrary host paths.
