@@ -36,7 +36,7 @@ All data lives on a ZFS pool and is bind-mounted into containers. The LXC root f
 │       ├── setup.sh       # Main setup runner (see below)
 │       └── modules/       # Idempotent setup modules
 └── services/              # Docker Compose service definitions
-    ├── ai/               # Ollama (LLM) + Open WebUI (chat) + SearXNG (web search) + Athena MCP (homelab-status MCP)
+    ├── ai/               # Ollama (LLM) + Open WebUI (chat) + SearXNG (web search) + Athena MCP (homelab-status + shopping-list MCP)
     ├── backup/            # Rclone cloud backup
     ├── bedrock-connect/   # Console server-list menu (BedrockConnect) for Minecraft
     ├── dns/               # AdGuard Home
@@ -402,12 +402,13 @@ persists on `${DOCKER_APPDATA_ROOT}/searxng` (ZFS-backed).
   re-seeding (wiping the Open WebUI data) or toggling them in Admin Settings → Web Search.
 - SearXNG deploys as part of the `ai` service — no separate `HOMELAB_SERVICES` entry is needed.
 
-### Athena MCP (homelab-status MCP server)
+### Athena MCP (homelab-status + shopping-list MCP server)
 
-The `services/ai/` stack also runs **Athena MCP**, a read-only [MCP](https://modelcontextprotocol.io)
-server that exposes homelab health as tools — Beszel systems + metrics, Scrutiny drive SMART health,
-and Proxmox storage capacity + guests — over Streamable HTTP, consumed by **Open WebUI's native MCP**
-client so the family AI can answer "is everything healthy?" from live data.
+The `services/ai/` stack also runs **Athena MCP**, an [MCP](https://modelcontextprotocol.io) server
+that exposes homelab health as tools — Beszel systems + metrics, Scrutiny drive SMART health, and
+Proxmox storage capacity + guests (all read-only) — plus **Koffan shopping-list** tools (list, add,
+and check items) over Streamable HTTP, consumed by **Open WebUI's native MCP** client so the family
+AI can answer "is everything healthy?" or add to the shopping list from live data.
 
 Like Ollama and SearXNG it has **no auth**, so it is never placed behind the public reverse proxy: it
 publishes no host port and is reachable only over the shared `ai` Docker network at
@@ -422,9 +423,11 @@ registry, so the pin is bumped by hand: get the newest tag from the athena-mcp C
 and the digest from that build's registry manifest, then update both in `services/ai/docker-compose.yml`.
 
 Config is via env vars (see the `ATHENA_MCP_*` keys in `.env.template`). The Beszel/Scrutiny/Proxmox
-*connection* details are reused from those services' own vars; the `ATHENA_MCP_*` keys are this
-service's own credentials. `Homelab__Proxmox__AllowInsecureTls=true` is set in compose (config, not a
-secret): the Proxmox API presents a self-signed cert, trusted for this client only.
+and Koffan *connection* details are reused from those services' own vars (Koffan is reached over the
+host's published port, `${DOCKER_HOST_IP}:${KOFFAN_HTTP_PORT}`, since it runs on a separate network);
+the `ATHENA_MCP_*` keys are this service's own credentials. `Homelab__Proxmox__AllowInsecureTls=true`
+is set in compose (config, not a secret): the Proxmox API presents a self-signed cert, trusted for
+this client only.
 
 **One-time operator setup** (needs admin on Forgejo/Beszel/Proxmox + write access to the NAS config):
 
