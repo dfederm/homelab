@@ -45,6 +45,7 @@ All data lives on a ZFS pool and is bind-mounted into containers. The LXC root f
     ├── forgejo/           # Forgejo git hosting + Actions CI runner
     ├── homepage/          # Landing page dashboard
     ├── jellyfin/          # Media streaming
+    ├── koffan/            # Shared shopping list (local-first PWA)
     ├── minecraft/         # Minecraft Bedrock servers (multi-world)
     ├── monitoring/        # Beszel hub + Uptime Kuma
     ├── monitoring-agent/  # Beszel agent (runs on all hosts)
@@ -425,6 +426,27 @@ First-run setup notes:
   `vikunja user` CLI — there is no in-app admin role. To allow temporary self-registration
   instead, set `VIKUNJA_ENABLE_REGISTRATION=true`, redeploy, register, then set it back to
   `false`.
+
+### Koffan (shared shopping list)
+
+`services/koffan/` runs [Koffan](https://github.com/PanSalut/Koffan), a featherweight local-first
+shopping-list PWA (Go + Fiber + SQLite, ~2.5 MB RAM). It is a **dedicated** app for the household
+shopping list — task management stays in Vikunja. It supports multiple named lists (e.g. Grocery,
+Costco), works fully offline and auto-syncs on reconnect, and updates in real time over WebSocket
+while the app is open on multiple devices.
+
+A single container persists its SQLite database at `${DOCKER_APPDATA_ROOT}/koffan/shopping.db`
+(ZFS-backed). It is exposed via Caddy at `KOFFAN_FQDN` (also on the LAN at
+`http://<docker-host-ip>:${KOFFAN_HTTP_PORT}`); Caddy upgrades the WebSocket automatically.
+Setting `KOFFAN_API_TOKEN` (a secret) enables a token-gated REST API
+([wiki](https://github.com/PanSalut/Koffan/wiki/REST-API)).
+
+**Auth.** Koffan has a simple single-password login (`KOFFAN_APP_PASSWORD`, a secret; a blank value
+falls back to Koffan's public default, so set a strong one). Since it is publicly exposed, once
+Authelia is in place move Koffan behind it: set `KOFFAN_DISABLE_AUTH=true` (defaults `false`, which
+ignores `APP_PASSWORD`), bind the host port to localhost (or drop it) so the LAN can't bypass the
+proxy, and add `forward_auth` to the Caddy block for the UI/`/ws` while **bypassing `/api/*`** (the
+REST API uses its own `API_TOKEN` bearer and can't do interactive SSO).
 
 ### Radicale (CalDAV/CardDAV)
 

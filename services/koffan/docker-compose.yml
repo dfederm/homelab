@@ -1,0 +1,40 @@
+# Koffan — featherweight self-hosted shared shopping list (Go + Fiber + SQLite, ~2.5 MB RAM).
+# Local-first PWA (offline add/check, auto-sync on reconnect) with real-time WebSocket updates and
+# multiple named lists. See the Koffan section in the top-level README.md for the auth model.
+name: koffan
+
+services:
+  koffan:
+    container_name: koffan
+    image: ghcr.io/pansalut/koffan:v2.12.0@sha256:7835d1a11790ffcbb5a56b980166ce86aac53790f0df1f90fce45eaa465eab55
+    restart: unless-stopped
+    # Run as root so the root-owned ZFS bind mount at /data is writable with no chown.
+    user: "0:0"
+    environment:
+      - TZ=${TZ}
+      # Pin the image defaults so a Renovate bump can't silently change them.
+      - APP_ENV=production
+      - PORT=8080
+      - DB_PATH=/data/shopping.db
+      # true = skip Koffan's own login and let the reverse proxy handle auth (Authelia). Keep
+      # false until Authelia is in place — see README "Switching to Authelia".
+      - DISABLE_AUTH=${KOFFAN_DISABLE_AUTH}
+      # Login password, used when DISABLE_AUTH=false. A SECRET — set a strong value; a blank value
+      # falls back to Koffan's public default (shopping123).
+      - APP_PASSWORD=${KOFFAN_APP_PASSWORD}
+      # Enables the token-gated REST API. A SECRET; optional —
+      # blank leaves it disabled. https://github.com/PanSalut/Koffan/wiki/REST-API
+      - API_TOKEN=${KOFFAN_API_TOKEN}
+    volumes:
+      # SQLite database (/data/shopping.db), persisted on ZFS-backed appdata.
+      - ${DOCKER_APPDATA_ROOT}/koffan:/data
+      - /etc/localtime:/etc/localtime:ro
+    ports:
+      # Container listens on 8080 (changed from 80 in Koffan 2.10.0).
+      - '${KOFFAN_HTTP_PORT}:8080'
+    # The image ships its own HEALTHCHECK (wget spider on /login), so none is defined here.
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

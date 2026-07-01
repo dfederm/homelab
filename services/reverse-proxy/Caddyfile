@@ -50,6 +50,12 @@
 	reverse_proxy localhost:{$VIKUNJA_HTTP_PORT}
 }
 
+# Koffan - shared shopping list (PWA). Caddy upgrades the WebSocket automatically, so
+# real-time sync works through the proxy with no extra config.
+{$KOFFAN_FQDN} {
+	reverse_proxy localhost:{$KOFFAN_HTTP_PORT}
+}
+
 # Radicale - CalDAV/CardDAV (calendar + contacts). The .well-known redirects let clients
 # auto-discover the DAV root from the bare domain (e.g. iOS adding a CalDAV account with just
 # the server hostname).
