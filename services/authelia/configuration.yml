@@ -1,0 +1,121 @@
+---
+###############################################################################
+# Authelia configuration — declarative, committed to the repo.
+#
+# This file carries NO secrets and NO personal domains. Authelia's `template` config filter (enabled
+# via X_AUTHELIA_CONFIG_FILTERS=template in docker-compose.yml) renders it at load time: the template
+# `env` function inlines a non-secret value (domains / URLs) from the environment, and the `secret`
+# function inlines the contents of a mounted secret file (the OIDC issuer key). Both are used below
+# with the usual Go double-brace template delimiters.
+# NOTE: the filter processes the WHOLE file, INCLUDING comments — so this file must never contain a
+# literal double-brace template tag inside a comment, as it would be executed (and fail). That's why
+# the guidance below spells the functions out in prose instead of showing live tags.
+# Scalar secrets (session, storage-encryption, reset-password JWT, OIDC HMAC) are loaded by Authelia
+# directly from AUTHELIA_*_SECRET / _KEY environment variables and are intentionally absent here —
+# defining a secret in both the file and the environment stops Authelia from starting.
+###############################################################################
+
+theme: 'light'
+
+server:
+  address: 'tcp://:9091'
+
+log:
+  level: 'info'
+
+totp:
+  # Shown in the authenticator app when a user enrolls a TOTP device.
+  issuer: '{{ env "HOMELAB_ROOT_DOMAIN" }}'
+
+authentication_backend:
+  # File user backend: a small family, no LDAP. Declarative and version-controllable in shape,
+  # though the actual users.yml (argon2 hashes + emails) is a SECRET kept off this repo and mounted
+  # from the NAS. See users.example.yml.
+  file:
+    path: '/secrets/users.yml'
+    # Reload users.yml when it changes so accounts can be added/edited without restarting Authelia.
+    watch: true
+
+# Forward-auth authorization (the Caddy `forward_auth` path). No browser-only surfaces are wired
+# yet — Open WebUI, the first surface, integrates via OIDC below, NOT forward-auth — so the only
+# policy in effect is the secure catch-all default_policy below: `two_factor`. (Authelia forbids
+# `deny` as the default when no rules are defined; `two_factor` is the safest allowed default —
+# anything later proxied through forward-auth demands full 2FA until a more specific rule relaxes
+# it.) NOTE: this global access_control governs ONLY forward-auth; OIDC clients are authorized by
+# their own `authorization_policy` (see identity_providers.oidc below), so this does not affect the
+# family=one_factor / admin=two_factor split for Open WebUI's OIDC login.
+# When a forward-auth surface is added, add a rule under `rules:` with the surface's `domain`
+# (templated from an env var, exactly like session.cookies below) and a `policy` of 'two_factor'
+# (or 'one_factor' for a low-sensitivity family surface). A path that can't do interactive SSO (e.g.
+# a CalDAV endpoint) needs a more specific 'bypass' rule listed FIRST (rules are evaluated top-down):
+# the same `domain`, a `resources` regex matching the path, and `policy: 'bypass'`, followed by the
+# interactive rule for the rest of that domain. See the Authelia access_control docs for the schema.
+access_control:
+  default_policy: 'two_factor'
+  rules: []
+
+session:
+  # secret ← AUTHELIA_SESSION_SECRET (env). The cookie is scoped to the parent domain so a single
+  # session is valid across every *.<root domain> service — needed once forward-auth surfaces exist.
+  cookies:
+    - domain: '{{ env "HOMELAB_ROOT_DOMAIN" }}'
+      authelia_url: '{{ env "HOMELAB_AUTHELIA_URL" }}'
+
+storage:
+  # encryption_key ← AUTHELIA_STORAGE_ENCRYPTION_KEY (env). Local SQLite (no DB container): holds
+  # 2FA device enrollments + per-user preferences. Persisted on ZFS-backed appdata at /data.
+  local:
+    path: '/data/db.sqlite3'
+
+notifier:
+  # No SMTP dependency: identity-verification notifications (e.g. TOTP enrollment links) are written
+  # to a file on appdata. Initially only the admin (the sole two_factor user) needs to read it; wire
+  # SMTP later if self-service family flows are wanted.
+  filesystem:
+    filename: '/data/notification.txt'
+
+identity_providers:
+  oidc:
+    # hmac_secret ← AUTHELIA_IDENTITY_PROVIDERS_OIDC_HMAC_SECRET (env).
+    # Issuer signing key: an RSA private key kept off this repo, mounted read-only at
+    # /secrets/oidc.private.pem and inlined here by the template filter.
+    jwks:
+      - key_id: 'main'
+        algorithm: 'RS256'
+        use: 'sig'
+        key: |
+          {{- secret "/secrets/oidc.private.pem" | nindent 10 }}
+    # Per-app authorization policies. `open_webui`: family accounts satisfy one_factor (password),
+    # while admins are required to complete two_factor (TOTP). This expresses "2FA for admins,
+    # single-factor acceptable for low-sensitivity family" per-app; membership comes from the
+    # `admins` group in users.yml.
+    authorization_policies:
+      open_webui:
+        default_policy: 'one_factor'
+        rules:
+          - policy: 'two_factor'
+            subject: 'group:admins'
+    clients:
+      # === Open WebUI (chat / Athena) — the first protected surface ===
+      # Open WebUI keeps its OWN local login enabled as a break-glass path (see services/ai); this
+      # OIDC client adds "Login with Authelia" on top.
+      - client_id: 'open-webui'
+        client_name: 'Open WebUI'
+        # pbkdf2 digest of the client secret (a safe one-way hash; the plaintext is configured in
+        # Open WebUI). Read from a file on the NAS secrets mount rather than an env var: the digest
+        # is a PHC string full of '$' delimiters, and this repo's run-service.sh passes env files to
+        # `docker compose --env-file`, whose interpolation would mangle those '$' sequences. `trim`
+        # drops any trailing newline the file was saved with (which would otherwise fold into this
+        # quoted scalar as a space and corrupt the digest).
+        client_secret: '{{ secret "/secrets/open-webui-client.digest" | trim }}'
+        public: false
+        authorization_policy: 'open_webui'
+        redirect_uris:
+          - '{{ env "OPEN_WEBUI_REDIRECT_URI" }}'
+        scopes:
+          - 'openid'
+          - 'profile'
+          - 'email'
+        # Open WebUI authenticates to the token endpoint with HTTP Basic (the default).
+        token_endpoint_auth_method: 'client_secret_basic'
+...

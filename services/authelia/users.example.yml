@@ -1,0 +1,38 @@
+---
+###############################################################################
+# EXAMPLE Authelia file user backend.
+#
+# The REAL file is a SECRET and is NOT committed to this public repo. Create it on the NAS at
+#   ${CONFIG_DIR}/authelia/users.yml
+# (it is mounted read-only into the container at /secrets/users.yml). Copy this example, then
+# replace the display names, emails, groups, and — critically — the password hashes.
+#
+# Generate an argon2id hash for each password (run inside the deployed Authelia container, or with a
+# throwaway one):
+#   docker exec -it authelia authelia crypto hash generate argon2 --password 'the-password'
+# Paste the resulting "$argon2id$..." string as the `password:` value (quote it — it contains $).
+#
+# Group meaning in this homelab:
+#   admins  → subject to the stricter per-app policies (e.g. Open WebUI requires TOTP 2FA for admins)
+#   (none)  → low-sensitivity family accounts (Open WebUI accepts one_factor / password only)
+# Emails must be present and unique: Open WebUI merges OIDC logins onto existing local accounts by
+# email (OAUTH_MERGE_ACCOUNTS_BY_EMAIL), and Authelia uses email for identity-verification notices.
+###############################################################################
+
+users:
+  admin:
+    disabled: false
+    displayname: 'Admin User'
+    # docker exec -it authelia authelia crypto hash generate argon2 --password '...'
+    password: '$argon2id$v=19$m=65536,t=3,p=4$REPLACE_WITH_A_REAL_ARGON2ID_HASH'
+    email: 'admin@example.com'
+    groups:
+      - 'admins'
+
+  family:
+    disabled: false
+    displayname: 'Family Member'
+    password: '$argon2id$v=19$m=65536,t=3,p=4$REPLACE_WITH_A_REAL_ARGON2ID_HASH'
+    email: 'family@example.com'
+    groups: []
+...

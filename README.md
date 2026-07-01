@@ -37,6 +37,7 @@ All data lives on a ZFS pool and is bind-mounted into containers. The LXC root f
 │       └── modules/       # Idempotent setup modules
 └── services/              # Docker Compose service definitions
     ├── ai/               # Ollama (LLM) + Open WebUI (chat) + SearXNG (web search) + Athena MCP (homelab-status MCP)
+    ├── authelia/          # Single sign-on / OIDC identity provider
     ├── backup/            # Rclone cloud backup
     ├── bedrock-connect/   # Console server-list menu (BedrockConnect) for Minecraft
     ├── dns/               # AdGuard Home
@@ -333,6 +334,38 @@ Services are defined per-machine in the env file:
 HOMELAB_SERVICES=dns,reverse-proxy,jellyfin,photos,files,monitoring,homepage,dozzle
 ```
 
+### Authelia (SSO)
+
+`services/authelia/` runs [Authelia](https://www.authelia.com) as the homelab's **single sign-on /
+identity provider**, giving the family one login for the services that support it and letting admin
+surfaces sit behind 2FA. It integrates two ways:
+
+- **OpenID Connect (OIDC)** — Authelia is an OIDC provider; apps that speak OIDC (Open WebUI,
+  Forgejo, Immich, Vikunja, Miniflux, …) redirect their login to it. This also works for those
+  apps' native/mobile clients, so it's preferred wherever supported.
+- **forward-auth** — Caddy can gate a browser-only web UI (e.g. an admin dashboard) by delegating
+  the auth decision to Authelia. None are wired yet.
+
+**[Open WebUI](#ai-ollama--open-webui) is the first protected surface**, via OIDC, keeping its local
+login as break-glass. Some services deliberately stay on their **own** auth because SSO breaks their
+native clients — Jellyfin (TV/mobile apps), Home Assistant (companion app), Radicale (CalDAV Basic
+auth) — which also makes them accidental break-glass access if Authelia is down.
+
+Config is declarative: `services/authelia/configuration.yml` is committed and mounted read-only
+(like the Caddyfile), carrying **no secrets and no personal domains**. Scalar secrets come from
+`AUTHELIA_*` env vars; personal values (domains, the OIDC issuer key) are injected at load time by
+Authelia's `template` config filter. The file user backend (`users.yml`) and the OIDC issuer key are
+secrets kept on the NAS at `${CONFIG_DIR}/authelia/`, never in this repo. Authelia's own state — the
+SQLite DB of TOTP enrollments + user preferences, and the filesystem notifier file — persists on
+`${DOCKER_APPDATA_ROOT}/authelia` (ZFS-backed). Sessions are stored **in-memory** (no Redis): the
+only cost is re-login after an Authelia restart; 2FA enrollments persist in SQLite regardless.
+
+Caddy proxies `AUTHELIA_FQDN` to the container (`localhost:${AUTHELIA_HTTP_PORT}`); wildcard DNS
+already resolves the host, so only the Caddy site block is needed. Deploy by adding `authelia` to
+`HOMELAB_SERVICES`. **First-run setup (secrets, `users.yml`, the OIDC issuer key, the client-secret
+pair) and the reusable per-app OIDC / forward-auth recipes are documented in
+[`services/authelia/README.md`](services/authelia/README.md).**
+
 ### AI (Ollama + Open WebUI)
 
 `services/ai/` runs the family AI stack as a single compose project on the shared internal
@@ -349,6 +382,12 @@ admin), so unlike Ollama it is exposed via Caddy at `OPEN_WEBUI_FQDN`. It is als
 on the LAN at `http://<docker-host-ip>:${OPEN_WEBUI_HTTP_PORT}`. Its SQLite DB + ChromaDB
 (per-user chats, settings, RAG vectors) persist on `${DOCKER_APPDATA_ROOT}/open-webui`
 (ZFS-backed).
+
+Open WebUI is also the **first surface behind [Authelia](#authelia-sso) SSO** (OIDC): a "Login
+with Authelia" button is added on top of — not in place of — its local login form, which stays
+enabled as break-glass. Admins are challenged for TOTP 2FA; family accounts sign in with a
+password. The wiring is the `OPENID_PROVIDER_URL` / `OAUTH_CLIENT_ID` / `OAUTH_CLIENT_SECRET`
+env on the `open-webui` service; see the Authelia section for the client setup.
 
 First-run setup notes:
 - **Claim the admin account immediately on a fresh deploy.** Open WebUI is internet-facing
