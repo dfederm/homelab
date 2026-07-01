@@ -9,12 +9,12 @@
   "rebaseWhen": "behind-base-branch",
   "packageRules": [
     {
-      "description": "Check for Docker image updates daily",
+      "description": "Check for Docker image updates weekly",
       "matchDatasources": [
         "docker"
       ],
       "schedule": [
-        "before 6am"
+        "before 6am on monday"
       ]
     },
     {
