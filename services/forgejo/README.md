@@ -69,7 +69,7 @@ The runner uses the shared-secret model — a token from the web UI's "Create ne
 | Token | Scope | Used by |
 |---|---|---|
 | **CI push** | `package` → **write** | The CI workflow, to push the image. |
-| **Host pull** | `package` → **read** | The Docker host `docker login`, to pull the private image at deploy time. |
+| **Host pull** | `package` → **read** | The Docker host, to pull the private image at deploy time (via the `configure-docker-registry` setup module). |
 
 > Tip: in Forgejo the `package` scope offers read/write granularity. Use write for CI, read for the
 > pull-only host token, so the long-lived host credential cannot push.
@@ -84,8 +84,9 @@ For each repo that runs CI against this runner: **Repo → Settings → Actions 
 | `REGISTRY_USER` | the Forgejo username that owns the **CI push** PAT. |
 | `REGISTRY_TOKEN` | the **CI push** PAT (`package:write`) from step 3. |
 
-The **host pull** PAT (`package:read`) is consumed later by a service-deploy step (the Docker
-host's `docker login <CONTAINER_REGISTRY>`), not stored as a repo secret.
+The **host pull** PAT (`package:read`) is consumed by the `configure-docker-registry` setup module,
+which runs `docker login <CONTAINER_REGISTRY>` on the Docker host at setup time. Store it in the NAS
+env as `CONTAINER_REGISTRY_TOKEN` (with `CONTAINER_REGISTRY_USER`), not as a repo secret.
 
 #### 5. Enable Actions on the repo
 

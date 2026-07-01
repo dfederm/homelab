@@ -36,7 +36,7 @@ All data lives on a ZFS pool and is bind-mounted into containers. The LXC root f
 │       ├── setup.sh       # Main setup runner (see below)
 │       └── modules/       # Idempotent setup modules
 └── services/              # Docker Compose service definitions
-    ├── ai/               # Ollama (LLM serving) + Open WebUI (chat) + SearXNG (web search)
+    ├── ai/               # Ollama (LLM) + Open WebUI (chat) + SearXNG (web search) + Athena MCP (homelab-status MCP)
     ├── backup/            # Rclone cloud backup
     ├── bedrock-connect/   # Console server-list menu (BedrockConnect) for Minecraft
     ├── dns/               # AdGuard Home
@@ -90,6 +90,7 @@ Modules are standalone, idempotent scripts in `scripts/setup/modules/`. Each han
 | `configure-pi-kiosk` | Set up Cage + Chromium kiosk browser pointing at a URL (Raspberry Pi specific) | Alarm panel Pi |
 | `configure-scrutiny-collector` | Install Scrutiny SMART collector (pinned binary) + timer; pushes drive health to the Scrutiny web UI | Proxmox host |
 | `configure-macvlan-bridge` | Persist macvlan bridge so host can reach macvlan containers | Docker LXC |
+| `configure-docker-registry` | Log the Docker host into the private OCI registry (`CONTAINER_REGISTRY`) so it can pull our self-published images (e.g. Athena MCP) | Docker LXC |
 | `configure-proxmox-repos` | Switch from paid enterprise repos to free community repos | Proxmox host |
 | `configure-smb-mount` | Mount NAS share via CIFS, persist in fstab | Remote machines |
 | `configure-lxc-fstrim` | Scheduled `pct fstrim` of LXC rootfs volumes (`LXC_FSTRIM_SCHEDULE`) so blocks freed inside containers return to the LVM thin pool | Proxmox host |
@@ -117,7 +118,7 @@ setup.sh on Proxmox host
   → configure-lxc-fstrim (periodic thin-pool reclaim for LXC rootfs)
   → create-lxcs
     → creates Docker LXC (GPU passthrough if _GPU=1), then runs setup.sh inside it
-      → create-users, install-tools, configure-ssh, install-docker, configure-macvlan-bridge
+      → create-users, install-tools, configure-ssh, install-docker, configure-docker-registry, configure-macvlan-bridge
       → deploys HOMELAB_SERVICES (Jellyfin, Immich, Caddy, Scrutiny, monitoring, monitoring-agent, etc.)
     → creates NAS LXC, then runs setup.sh inside it
       → create-users, install-tools, configure-ssh, install-samba, set-share-permissions,
@@ -400,6 +401,58 @@ persists on `${DOCKER_APPDATA_ROOT}/searxng` (ZFS-backed).
   values — read on first launch then managed in the UI/DB, so changing them later requires
   re-seeding (wiping the Open WebUI data) or toggling them in Admin Settings → Web Search.
 - SearXNG deploys as part of the `ai` service — no separate `HOMELAB_SERVICES` entry is needed.
+
+### Athena MCP (homelab-status MCP server)
+
+The `services/ai/` stack also runs **Athena MCP**, a read-only [MCP](https://modelcontextprotocol.io)
+server that exposes homelab health as tools — Beszel systems + metrics, Scrutiny drive SMART health,
+and Proxmox storage capacity + guests — over Streamable HTTP, consumed by **Open WebUI's native MCP**
+client so the family AI can answer "is everything healthy?" from live data.
+
+Like Ollama and SearXNG it has **no auth**, so it is never placed behind the public reverse proxy: it
+publishes no host port and is reachable only over the shared `ai` Docker network at
+`http://athena-mcp:8080`. It deploys as part of the `ai` service — no separate `HOMELAB_SERVICES`
+entry is needed.
+
+The image is our own, built + published by the `athena-mcp` repo's Forgejo CI (`dotnet publish
+-t:PublishContainer`, no Dockerfile) to the Forgejo OCI registry (the same one Forgejo hosts — see
+[`services/forgejo/README.md`](services/forgejo/README.md)). It is **private and pinned by tag AND
+digest** (`${CONTAINER_REGISTRY}/david/athena-mcp:<tag>@sha256:…`). Renovate can't reach the private
+registry, so the pin is bumped by hand: get the newest tag from the athena-mcp CI publish job summary
+and the digest from that build's registry manifest, then update both in `services/ai/docker-compose.yml`.
+
+Config is via env vars (see the `ATHENA_MCP_*` keys in `.env.template`). The Beszel/Scrutiny/Proxmox
+*connection* details are reused from those services' own vars; the `ATHENA_MCP_*` keys are this
+service's own credentials. `Homelab__Proxmox__AllowInsecureTls=true` is set in compose (config, not a
+secret): the Proxmox API presents a self-signed cert, trusted for this client only.
+
+**One-time operator setup** (needs admin on Forgejo/Beszel/Proxmox + write access to the NAS config):
+
+1. **Give the Docker host registry credentials** so it can pull the image. This is declarative: set
+   `CONTAINER_REGISTRY`, `CONTAINER_REGISTRY_USER`, and `CONTAINER_REGISTRY_TOKEN` (a `package:read`
+   Forgejo PAT) in the NAS env, and add `configure-docker-registry` to the Docker host's
+   `HOMELAB_SETUP_MODULES` (after `install-docker`). Setup then runs `docker login` for you and
+   re-authenticates automatically after an LXC rebuild — no manual step to remember.
+2. **Create a read-only Beszel user** and set `ATHENA_MCP_BESZEL_IDENTITY` / `_PASSWORD`
+   (`_AUTH_COLLECTION` defaults to `users`; use `_superusers` only if a superuser is required to read
+   every host). **Share each monitored host with this user** in Beszel, or it is silently missing from
+   `list_systems`.
+3. **Grant Proxmox read-only access.** With privilege separation (the default) the token's effective
+   permissions are the *intersection* of the user's and the token's ACLs, so **both** need the role:
+   `pveum acl modify / --users 'athena@pve' --roles PVEAuditor` **and**
+   `pveum acl modify / --tokens 'athena@pve!mcp' --roles PVEAuditor`. Set `ATHENA_MCP_PROXMOX_TOKEN_ID`
+   (`user@realm!tokenid`), `ATHENA_MCP_PROXMOX_TOKEN_SECRET`, and `ATHENA_MCP_PROXMOX_NODE` (the node
+   whose storage/guests to report).
+4. **Register the server in Open WebUI** (a PersistentConfig/UI step, like the SearXNG web-search
+   wiring) pointing at `http://athena-mcp:8080` — deploying only makes it *reachable*, not wired in.
+
+After `./scripts/run-service.sh ai`, confirm `docker ps` shows `athena-mcp` `(healthy)` and
+`docker exec open-webui curl -s http://athena-mcp:8080/health` returns `Healthy`.
+
+> **Health check:** the ASP.NET runtime image has no `curl`/`wget`/`bash`, so the container can't
+> probe its `/health` endpoint with a shell command. Instead the app probes itself — the `healthcheck`
+> re-invokes the binary as `dotnet /app/AthenaMcp.Server.dll --health-check`, which issues an
+> in-process GET to `/health` and exits `0` (healthy) / non-zero (unhealthy).
 
 ### Vikunja (task management)
 

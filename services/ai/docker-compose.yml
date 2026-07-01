@@ -1,9 +1,10 @@
 # The family AI stack, sharing the internal `ai` network: Ollama (local LLM serving), Open
-# WebUI (chat frontend, reaches Ollama at http://ollama:11434), and SearXNG (private
-# web-search backend for Open WebUI, reached at http://searxng:8080).
-# Neither Ollama nor SearXNG has authentication, so neither is ever placed behind the public
-# reverse proxy — they are reachable only on the internal `ai` network and the LAN. Open WebUI
-# has its own multi-user auth and is exposed publicly via Caddy (the site block lives in
+# WebUI (chat frontend, reaches Ollama at http://ollama:11434), SearXNG (private web-search
+# backend for Open WebUI, reached at http://searxng:8080), and Athena MCP (read-only
+# homelab-status MCP server, reached at http://athena-mcp:8080).
+# None of Ollama, SearXNG, or Athena MCP has authentication, so none is ever placed behind the
+# public reverse proxy — they are reachable only on the internal `ai` network and the LAN. Open
+# WebUI has its own multi-user auth and is exposed publicly via Caddy (the site block lives in
 # services/reverse-proxy/Caddyfile). Because it is internet-facing from first boot, claim the
 # admin account promptly on a fresh deploy (the first account to register becomes admin).
 services:
@@ -151,6 +152,62 @@ services:
         - import urllib.request; urllib.request.urlopen('http://localhost:8080/healthz')
       interval: 30s
       timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Athena MCP — the read-only homelab-status MCP server. Exposes homelab health as MCP tools
+  # (Beszel systems + metrics, Scrutiny drive SMART health, Proxmox storage capacity + guests) over
+  # Streamable HTTP, consumed by Open WebUI's native MCP client at http://athena-mcp:8080. Like
+  # Ollama and SearXNG it has no auth, so it is never placed behind the public reverse proxy and
+  # publishes no host port — the `ai` network + LAN is the trust boundary.
+  # The image is our own, built + published by the athena-mcp repo's Forgejo CI (`dotnet publish
+  # -t:PublishContainer`, no Dockerfile) to our Forgejo OCI registry. It is PRIVATE, so the Docker
+  # host authenticates via the configure-docker-registry setup module (declarative `docker login`
+  # from CONTAINER_REGISTRY_USER/_TOKEN) before `docker compose pull` can fetch it (see the "Athena
+  # MCP" section in the root README).
+  # `${CONTAINER_REGISTRY}` keeps the registry host out of this public repo; the image name + digest
+  # stay in-repo (immutable, non-sensitive), pinning tag AND digest like the `forgejo`/`ollama` idiom.
+  athena-mcp:
+    container_name: athena-mcp
+    # Pinned by tag AND digest (like forgejo/ollama). Renovate can't reach this private registry, so
+    # bump both by hand: get the newest tag from the athena-mcp CI publish job summary and the digest
+    # from that build's registry manifest.
+    image: ${CONTAINER_REGISTRY}/david/athena-mcp:0.1.5@sha256:09f617ebc212eb45cfffb55f016380fb68d21be6a41949c080ed60f29a76f976
+    restart: unless-stopped
+    environment:
+      - TZ=${TZ}
+      # Beszel hub (PocketBase REST) — published on the Docker host. Auth is a read-only service
+      # account (email Identity + Password); AuthCollection defaults to `users` unless a _superusers
+      # token is needed to read every host's records. Share each new host with this account in Beszel
+      # or it is missing from list_systems (see the root README).
+      - Homelab__Beszel__BaseUrl=http://${DOCKER_HOST_IP}:${BESZEL_WEB_PORT}
+      - Homelab__Beszel__Identity=${ATHENA_MCP_BESZEL_IDENTITY}
+      - Homelab__Beszel__Password=${ATHENA_MCP_BESZEL_PASSWORD}
+      - Homelab__Beszel__AuthCollection=${ATHENA_MCP_BESZEL_AUTH_COLLECTION:-users}
+      # Scrutiny web API — published on the Docker host, no auth (internal-only).
+      - Homelab__Scrutiny__BaseUrl=http://${DOCKER_HOST_IP}:${SCRUTINY_WEB_PORT}
+      # Proxmox VE API — self-signed cert (AllowInsecureTls trusts it for this client only). Auth is
+      # a read-only PVEAuditor API token; the user AND the token both need the role (privsep — see
+      # the root README).
+      - Homelab__Proxmox__BaseUrl=https://${PROXMOX_IP}:${PROXMOX_WEB_PORT}
+      - Homelab__Proxmox__Node=${ATHENA_MCP_PROXMOX_NODE}
+      - Homelab__Proxmox__ApiTokenId=${ATHENA_MCP_PROXMOX_TOKEN_ID}
+      - Homelab__Proxmox__ApiTokenSecret=${ATHENA_MCP_PROXMOX_TOKEN_SECRET}
+      - Homelab__Proxmox__AllowInsecureTls=true
+    networks:
+      - ai
+    healthcheck:
+      # The ASP.NET runtime image has no curl/wget/bash, so the server probes its own /health
+      # endpoint via its own binary (exit 0 = healthy). See the root README. The timeout is generous
+      # because each probe spins up a fresh `dotnet` process.
+      test: ['CMD', 'dotnet', '/app/AthenaMcp.Server.dll', '--health-check']
+      interval: 30s
+      timeout: 10s
       retries: 3
       start_period: 30s
     logging:
