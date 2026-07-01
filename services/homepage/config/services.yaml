@@ -29,6 +29,14 @@
         server: my-docker
         container: open-webui
 
+- Productivity:
+    - Vikunja:
+        icon: vikunja.png
+        href: "{{HOMEPAGE_VAR_TASKS_URL}}"
+        description: Task management
+        server: my-docker
+        container: vikunja
+
 - Infrastructure:
     - Home Assistant:
         icon: home-assistant.png
