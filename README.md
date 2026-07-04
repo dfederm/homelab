@@ -459,19 +459,20 @@ After `./scripts/run-service.sh ai`, confirm `docker ps` shows `athena-mcp` `(he
 
 ### HA MCP bridge (Home Assistant tools in Open WebUI)
 
-The `services/ai/` stack also runs **`ha-mcp-bridge`**, a tiny stateless [supergateway](https://github.com/supercorp-ai/supergateway)
-proxy that makes Home Assistant's tools available to the family AI. HA ships a built-in **MCP Server**
-integration, but it serves **SSE**, while Open WebUI's native MCP client speaks **Streamable HTTP**
-only. The bridge connects out to HA's SSE endpoint and re-exposes it as Streamable HTTP on the `ai`
-network, so Open WebUI registers it as a native MCP server exactly like Athena MCP
-(`http://ha-mcp-bridge:8000/mcp`). (supergateway can't translate SSE→Streamable HTTP in one hop, so
-the command nests an inner `supergateway --sse` SSE→stdio client inside the outer stdio→streamableHttp
-server. Drop this service entirely if HA core ever ships a native Streamable HTTP MCP transport.)
+The `services/ai/` stack also runs **`ha-mcp-bridge`**, an [mcpo](https://github.com/open-webui/mcpo)
+proxy (the Open WebUI project's MCP→OpenAPI bridge) that makes Home Assistant's tools available to the
+family AI. HA ships a built-in **MCP Server** integration, but it serves **SSE**, and Open WebUI's
+*native* MCP client only speaks Streamable HTTP at a protocol version HA's current release rejects —
+so a native-MCP bridge can't handshake. mcpo sidesteps that: it connects to HA's SSE endpoint as an
+MCP client (negotiating a compatible version) and re-exposes the tools as an **OpenAPI tool server**
+on the `ai` network at `http://ha-mcp-bridge:8000`, which Open WebUI consumes as a Tool Server.
+(If HA core ever adds Streamable HTTP MCP at a version OWUI accepts, this can be revisited.)
 
 Like Ollama/SearXNG/Athena MCP it has **no auth** of its own and publishes no host port — the `ai`
 network + LAN is the trust boundary. The only secret is `HA_MCP_TOKEN`. **What Athena can see and do
-is the capability ratchet:** it is exactly HA's *exposed-to-Assist* entity set — start read-only and
-add device-control writes deliberately, one at a time.
+is the capability ratchet:** it is exactly HA's *exposed-to-Assist* entity set — HA has no per-entity
+read-only flag, so an exposed controllable entity (light, lock, cover, …) becomes a callable tool.
+Expose deliberately.
 
 **One-time operator setup** (needs admin on Home Assistant):
 
@@ -481,13 +482,14 @@ add device-control writes deliberately, one at a time.
    login), then sign in as it once and create a **Long-Lived Access Token** (profile → Security →
    Long-Lived Access Tokens). Put it in `HA_MCP_TOKEN` in the NAS env (never committed).
 3. **Scope exposure = the ratchet.** Settings → Voice assistants → Expose. Expose only what Athena
-   should reach, **read-only first** (a couple of sensors); the MCP server exposes *exactly* this set.
-4. **Register the server in Open WebUI** (a PersistentConfig/UI step) pointing at
-   `http://ha-mcp-bridge:8000/mcp` as an **MCP (Streamable HTTP)** server; scope it to your account
-   first, then validate a read call and confirm unexposed entities are unreachable.
+   should reach; the MCP server exposes *exactly* this set.
+4. **Register the tool server in Open WebUI** (a PersistentConfig/UI step): Admin Settings → Tools →
+   add an **OpenAPI tool server** at `http://ha-mcp-bridge:8000`; scope it to your account first, then
+   validate a call and confirm unexposed entities are unreachable.
 
 After `./scripts/run-service.sh ai`, confirm `docker ps` shows `ha-mcp-bridge` up and
-`docker logs ha-mcp-bridge` shows it connected to HA and `Listening on port 8000`.
+`docker logs ha-mcp-bridge` shows `Successfully connected to 'home-assistant'` (config mode) or a
+`GET …/mcp_server/sse "HTTP/1.1 200 OK"` handshake (single-server mode) + `Application startup complete`.
 
 ### Vikunja (task management)
 
