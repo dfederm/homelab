@@ -457,6 +457,38 @@ After `./scripts/run-service.sh ai`, confirm `docker ps` shows `athena-mcp` `(he
 > re-invokes the binary as `dotnet /app/AthenaMcp.Server.dll --health-check`, which issues an
 > in-process GET to `/health` and exits `0` (healthy) / non-zero (unhealthy).
 
+### HA MCP bridge (Home Assistant tools in Open WebUI)
+
+The `services/ai/` stack also runs **`ha-mcp-bridge`**, a tiny stateless [supergateway](https://github.com/supercorp-ai/supergateway)
+proxy that makes Home Assistant's tools available to the family AI. HA ships a built-in **MCP Server**
+integration, but it serves **SSE**, while Open WebUI's native MCP client speaks **Streamable HTTP**
+only. The bridge connects out to HA's SSE endpoint and re-exposes it as Streamable HTTP on the `ai`
+network, so Open WebUI registers it as a native MCP server exactly like Athena MCP
+(`http://ha-mcp-bridge:8000/mcp`). (supergateway can't translate SSE→Streamable HTTP in one hop, so
+the command nests an inner `supergateway --sse` SSE→stdio client inside the outer stdio→streamableHttp
+server. Drop this service entirely if HA core ever ships a native Streamable HTTP MCP transport.)
+
+Like Ollama/SearXNG/Athena MCP it has **no auth** of its own and publishes no host port — the `ai`
+network + LAN is the trust boundary. The only secret is `HA_MCP_TOKEN`. **What Athena can see and do
+is the capability ratchet:** it is exactly HA's *exposed-to-Assist* entity set — start read-only and
+add device-control writes deliberately, one at a time.
+
+**One-time operator setup** (needs admin on Home Assistant):
+
+1. **Enable the integration** in HA: Settings → Devices & Services → Add Integration → **Model
+   Context Protocol Server**. It serves SSE at `/mcp_server/sse`.
+2. **Create a dedicated Athena service account** (Settings → People/Users → Add user — *not* your own
+   login), then sign in as it once and create a **Long-Lived Access Token** (profile → Security →
+   Long-Lived Access Tokens). Put it in `HA_MCP_TOKEN` in the NAS env (never committed).
+3. **Scope exposure = the ratchet.** Settings → Voice assistants → Expose. Expose only what Athena
+   should reach, **read-only first** (a couple of sensors); the MCP server exposes *exactly* this set.
+4. **Register the server in Open WebUI** (a PersistentConfig/UI step) pointing at
+   `http://ha-mcp-bridge:8000/mcp` as an **MCP (Streamable HTTP)** server; scope it to your account
+   first, then validate a read call and confirm unexposed entities are unreachable.
+
+After `./scripts/run-service.sh ai`, confirm `docker ps` shows `ha-mcp-bridge` up and
+`docker logs ha-mcp-bridge` shows it connected to HA and `Listening on port 8000`.
+
 ### Vikunja (task management)
 
 `services/vikunja/` runs [Vikunja](https://vikunja.io), the self-hosted task manager, as a

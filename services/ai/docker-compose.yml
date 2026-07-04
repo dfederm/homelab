@@ -222,6 +222,35 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  # HA MCP bridge — Home Assistant's MCP Server integration serves SSE, but Open WebUI's native MCP
+  # client speaks Streamable HTTP only. This stateless supergateway proxy connects to HA's SSE
+  # endpoint (with the Athena service-account token) and re-exposes Streamable HTTP on the `ai`
+  # network, so OWUI registers it like athena-mcp (http://ha-mcp-bridge:8000/mcp). No auth / no host
+  # port; scope = HA's exposed-to-Assist set (start read-only). See the README HA-MCP-bridge section.
+  # (Nested because supergateway can't do SSE->Streamable HTTP in one hop; drop it if HA core adds one.)
+  ha-mcp-bridge:
+    container_name: ha-mcp-bridge
+    image: supercorp/supergateway:3.4.3@sha256:095acf4471e142553c1a5514aa5e480abbc5885d00549d4a3481cc70eac53889
+    restart: unless-stopped
+    environment:
+      - TZ=${TZ}
+    command:
+      - --stdio
+      - supergateway --sse http://${HAOS_VM_IP}:8123/mcp_server/sse --oauth2Bearer ${HA_MCP_TOKEN}
+      - --outputTransport
+      - streamableHttp
+      - --port
+      - "8000"
+      - --streamableHttpPath
+      - /mcp
+    networks:
+      - ai
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 networks:
   ai:
     name: ai
