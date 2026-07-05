@@ -15,6 +15,13 @@ services:
     environment:
       - TZ=${TZ}
       - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE}
+      # Cap resident models + parallelism. Defaults (2 / 1) suit CPU serving: they stop large MoE
+      # weights (~17 GB each) stacking in RAM and thrashing (KEEP_ALIVE=24h otherwise pins every
+      # touched model for a day), while keeping the chat model + a small task/embed model
+      # co-resident (avoids 17 GB reload churn) and preventing both 17 GB models (instruct +
+      # thinking) resident at once. Override per-machine (e.g. raise on a GPU host) via the env file.
+      - OLLAMA_MAX_LOADED_MODELS=${OLLAMA_MAX_LOADED_MODELS:-2}
+      - OLLAMA_NUM_PARALLEL=${OLLAMA_NUM_PARALLEL:-1}
     volumes:
       # Pulled models persist here so they survive container recreation.
       - ${DOCKER_APPDATA_ROOT}/ollama:/root/.ollama
