@@ -245,7 +245,7 @@ services:
       - --name
       - home-assistant
       - --
-      - http://${HAOS_VM_IP}:8123/mcp_server/sse
+      - http://${HOMEASSISTANT_IP}:8123/mcp_server/sse
     networks:
       - ai
     logging:
