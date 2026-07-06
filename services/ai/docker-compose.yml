@@ -113,6 +113,28 @@ services:
       - ENABLE_WEB_SEARCH=true
       - WEB_SEARCH_ENGINE=searxng
       - SEARXNG_QUERY_URL=http://searxng:8080/search?q=<query>
+      # --- Single sign-on via Authelia (OIDC). This is ADDITIVE: Open WebUI keeps its local login
+      # form as break-glass (OAUTH_AUTO_REDIRECT is intentionally not set, so the form still shows
+      # alongside a "Login with Authelia" button). Authelia is the trusted IdP — accounts in its
+      # users.yml are already vetted — but new OAuth logins still land in DEFAULT_USER_ROLE=pending
+      # for admin approval (defense in depth). Existing local accounts are matched to their Authelia
+      # identity by email. The discovery URL points at Authelia; the container reaches it over the
+      # public FQDN via NAT hairpin (no extra_hosts needed). OPENID_REDIRECT_URI pins the OAuth
+      # callback explicitly instead of letting Open WebUI infer it from the incoming request (which
+      # would depend on forwarded proxy headers); it's built from ${OPEN_WEBUI_FQDN} so it always
+      # matches the client's redirect_uris in services/authelia/configuration.yml (built from the
+      # same FQDN). Unlike most Open WebUI settings these oauth.* vars are NOT frozen in the DB on
+      # first launch — ENABLE_OAUTH_PERSISTENT_CONFIG defaults to false, so they're re-read from here
+      # every startup; editing them and redeploying takes effect with no UI/DB reset. See
+      # services/authelia/README.md.
+      - ENABLE_OAUTH_SIGNUP=true
+      - OAUTH_MERGE_ACCOUNTS_BY_EMAIL=true
+      - OAUTH_PROVIDER_NAME=Authelia
+      - OPENID_PROVIDER_URL=https://${AUTHELIA_FQDN}/.well-known/openid-configuration
+      - OPENID_REDIRECT_URI=https://${OPEN_WEBUI_FQDN}/oauth/oidc/callback
+      - OAUTH_CLIENT_ID=open-webui
+      - OAUTH_CLIENT_SECRET=${OPEN_WEBUI_OIDC_CLIENT_SECRET}
+      - OAUTH_SCOPES=openid email profile
     volumes:
       - ${DOCKER_APPDATA_ROOT}/open-webui:/app/backend/data
     ports:

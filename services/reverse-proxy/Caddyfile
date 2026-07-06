@@ -64,3 +64,10 @@
 	redir /.well-known/caldav / permanent
 	reverse_proxy localhost:{$RADICALE_HTTP_PORT}
 }
+
+# Authelia - Single sign-on portal / OIDC identity provider (see services/authelia). Authelia
+# serves plain HTTP; Caddy terminates TLS. This block publishes the login portal; OIDC apps (e.g.
+# Open WebUI) redirect here, and any future forward-auth surface delegates here too.
+{$AUTHELIA_FQDN} {
+	reverse_proxy localhost:{$AUTHELIA_HTTP_PORT}
+}

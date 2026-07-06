@@ -51,7 +51,7 @@ The runner uses the shared-secret model — a token from the web UI's "Create ne
   ```bash
   docker exec --user git forgejo forgejo forgejo-cli actions register --keep-labels --name <host> --secret <secret>
   ```
-- On the NAS, add it to the Docker host's env file (e.g. `apollo.env`):
+- On the NAS, add it to the Docker host's env file (e.g. `<hostname>.env`):
   ```
   FORGEJO_RUNNER_TOKEN=<secret>
   ```
