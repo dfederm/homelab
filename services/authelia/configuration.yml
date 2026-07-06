@@ -89,6 +89,9 @@ identity_providers:
         # quoted scalar as a space and corrupt the digest).
         client_secret: '{{ secret "/secrets/open-webui-client.digest" | trim }}'
         public: false
+        # First-party app — skip the per-login consent prompt (auto-approve claim release). This is
+        # our default for trusted first-party clients.
+        consent_mode: 'implicit'
         # Every Open WebUI user must complete 2FA (TOTP). Admin is a separate concern managed inside
         # Open WebUI, so no per-group policy is needed here.
         authorization_policy: 'two_factor'

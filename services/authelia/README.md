@@ -181,9 +181,10 @@ To put another OIDC-capable service (Forgejo, Immich, Vikunja, Miniflux, …) be
    `docker compose --env-file`).
 2. **Add a client** to `identity_providers.oidc.clients` in `configuration.yml`, modeled on
    `open-webui`: set `client_id`, `client_secret` to `'{{ secret "/secrets/<app>-client.digest" | trim }}'`,
-   the app's `redirect_uris`, and `scopes`. If the redirect URI needs a personal domain, add a
-   matching non-secret `<APP>_REDIRECT_URI` env var in `docker-compose.yml` (templated, un-prefixed)
-   and reference it with `{{ env "<APP>_REDIRECT_URI" }}`.
+   the app's `redirect_uris`, `scopes`, and `consent_mode: 'implicit'` (skip the per-login consent
+   prompt — the default for our trusted first-party apps). If the redirect URI needs a personal
+   domain, add a matching non-secret `<APP>_REDIRECT_URI` env var in `docker-compose.yml` (templated,
+   un-prefixed) and reference it with `{{ env "<APP>_REDIRECT_URI" }}`.
 3. **Choose an authorization policy.** Set the client's `authorization_policy` to a built-in
    `one_factor` or `two_factor` (open-webui uses `two_factor`, so 2FA is required for every user).
    For finer control — e.g. 2FA for only some users — define a named policy under
