@@ -23,8 +23,8 @@ clients — and, as a bonus, they double as break-glass access if Authelia is ev
 - **Home Assistant** — the companion app authenticates against HA directly.
 - **Radicale** — CalDAV clients use HTTP Basic auth.
 
-Open WebUI itself also **keeps its local login enabled as break-glass** — OIDC is added on top, not
-as a replacement (`OAUTH_AUTO_REDIRECT` is left off so the local login form still appears).
+Open WebUI itself is enforced **SSO-only** — its local login form is disabled
+(`ENABLE_LOGIN_FORM=false`) and the login page redirects straight to Authelia (`OAUTH_AUTO_REDIRECT=true`).
 
 ## How the config is structured
 
@@ -155,7 +155,8 @@ new block it auto-provisions the `auth.<domain>` cert on first request (wildcard
 ### 6. Verify
 
 - `https://<AUTHELIA_FQDN>` shows the Authelia login portal.
-- On Open WebUI's login page, a **"Login with Authelia"** button appears beneath the local form.
+- Open WebUI redirects straight to Authelia to sign in (SSO-only; the local form is disabled). After
+  login you land back in Open WebUI.
 - Every user is challenged for **TOTP** 2FA (the first login prompts enrollment) before Open WebUI
   issues a session.
 
@@ -210,11 +211,11 @@ For a web UI that has no auth of its own:
 
 ## Enforcing SSO (hardening)
 
-While proving out a surface, keep the app's own login as break-glass — that's how Open WebUI ships
-here (the local form still shows alongside the "Login with Authelia" button). Once SSO is proven,
-make Authelia the **only** front door, so its 2FA, brute-force protection, and access policies
-can't be sidestepped by a local password. An enabled local login is a real bypass: the SSO boundary
-is only as strong as the weakest login path the app still accepts.
+When first proving out a surface, keep the app's own login as a temporary break-glass; once SSO is
+proven, make Authelia the **only** front door, so its 2FA, brute-force protection, and access
+policies can't be sidestepped by a local password. **Open WebUI is enforced SSO-only here** (see
+services/ai). An enabled local login is a real bypass: the SSO boundary is only as strong as the
+weakest login path the app still accepts.
 
 **Disable the app's local login.** For an OIDC app, flip its "SSO-only" switch. Open WebUI:
 

@@ -113,23 +113,24 @@ services:
       - ENABLE_WEB_SEARCH=true
       - WEB_SEARCH_ENGINE=searxng
       - SEARXNG_QUERY_URL=http://searxng:8080/search?q=<query>
-      # --- Single sign-on via Authelia (OIDC). This is ADDITIVE: Open WebUI keeps its local login
-      # form as break-glass (OAUTH_AUTO_REDIRECT is intentionally not set, so the form still shows
-      # alongside a "Login with Authelia" button). Authelia is the trusted IdP — accounts in its
-      # users.yml are already vetted — but new OAuth logins still land in DEFAULT_USER_ROLE=pending
-      # for admin approval (defense in depth). Existing local accounts are matched to their Authelia
-      # identity by email. The discovery URL points at Authelia; the container reaches it over the
-      # public FQDN via NAT hairpin (no extra_hosts needed). OPENID_REDIRECT_URI pins the OAuth
-      # callback explicitly instead of letting Open WebUI infer it from the incoming request (which
-      # would depend on forwarded proxy headers); it's built from ${OPEN_WEBUI_FQDN} so it always
-      # matches the client's redirect_uris in services/authelia/configuration.yml (built from the
-      # same FQDN). Unlike most Open WebUI settings these oauth.* vars are NOT frozen in the DB on
-      # first launch — ENABLE_OAUTH_PERSISTENT_CONFIG defaults to false, so they're re-read from here
-      # every startup; editing them and redeploying takes effect with no UI/DB reset. See
-      # services/authelia/README.md.
+      # --- Single sign-on via Authelia (OIDC), enforced SSO-only: Authelia is the sole login path.
+      # OAUTH_AUTO_REDIRECT sends the login page straight to Authelia; ENABLE_LOGIN_FORM=false removes
+      # the local username/password form. Existing accounts match their Authelia identity by email;
+      # new OAuth logins land in DEFAULT_USER_ROLE=pending for admin approval (defense in depth). The
+      # discovery URL reaches Authelia over the public FQDN (NAT hairpin, no extra_hosts). The
+      # OPENID_REDIRECT_URI pins the callback explicitly (from ${OPEN_WEBUI_FQDN}) so it always matches
+      # the client's redirect_uris in services/authelia/configuration.yml. The oauth.* vars (incl.
+      # OAUTH_AUTO_REDIRECT) are re-read from env each startup (ENABLE_OAUTH_PERSISTENT_CONFIG=false).
+      # ENABLE_LOGIN_FORM is the exception: PersistentConfig, read from env only at a fresh instance's
+      # FIRST launch then frozen in the DB — set here so a from-scratch instance is SSO-only, but on an
+      # already-initialized instance it must ALSO be toggled off in Admin Settings -> Auth. Break-glass
+      # if Authelia is down: re-enable the form in Admin Settings (needs a live admin session) or in
+      # Open WebUI's DB. See services/authelia/README.md.
       - ENABLE_OAUTH_SIGNUP=true
       - OAUTH_MERGE_ACCOUNTS_BY_EMAIL=true
       - OAUTH_PROVIDER_NAME=Authelia
+      - OAUTH_AUTO_REDIRECT=true
+      - ENABLE_LOGIN_FORM=false
       - OPENID_PROVIDER_URL=https://${AUTHELIA_FQDN}/.well-known/openid-configuration
       - OPENID_REDIRECT_URI=https://${OPEN_WEBUI_FQDN}/oauth/oidc/callback
       - OAUTH_CLIENT_ID=open-webui

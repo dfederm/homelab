@@ -383,9 +383,9 @@ on the LAN at `http://<docker-host-ip>:${OPEN_WEBUI_HTTP_PORT}`. Its SQLite DB +
 (per-user chats, settings, RAG vectors) persist on `${DOCKER_APPDATA_ROOT}/open-webui`
 (ZFS-backed).
 
-Open WebUI is also **protected by [Authelia](#authelia-sso) SSO** (OIDC): a "Login
-with Authelia" button is added on top of — not in place of — its local login form, which stays
-enabled as break-glass. Every user must complete TOTP 2FA (enrolled on first login). The wiring is
+Open WebUI is also **protected by [Authelia](#authelia-sso) SSO** (OIDC), enforced **SSO-only**: the
+local login form is disabled and the login page redirects straight to Authelia. Every user must
+complete TOTP 2FA (enrolled on first login). The wiring is
 the `OPENID_PROVIDER_URL` / `OAUTH_CLIENT_ID` / `OAUTH_CLIENT_SECRET`
 env on the `open-webui` service; see the Authelia section for the client setup.
 

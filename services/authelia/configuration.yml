@@ -78,8 +78,7 @@ identity_providers:
           {{- secret "/secrets/oidc.private.pem" | nindent 10 }}
     clients:
       # === Open WebUI (chat / Athena) ===
-      # Local login stays enabled as break-glass (see services/ai); this client adds "Login with
-      # Authelia" on top.
+      # Enforced SSO-only — local login disabled (see services/ai).
       - client_id: 'open-webui'
         client_name: 'Open WebUI'
         # pbkdf2 digest of the client secret (a safe one-way hash; the plaintext is configured in
