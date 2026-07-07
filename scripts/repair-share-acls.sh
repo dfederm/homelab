@@ -261,15 +261,16 @@ if [ -n "${SMB_MEDIA_PATH:-}" ]; then
     add_job "$SMB_MEDIA_PATH" root admin "group:admin:rwx,mask::rwx" 0
 fi
 
-# Optional homelab share (admin-only). Only the subdirs that install-samba.sh
-# recursively manages are included — backup/ and appdata/ are intentionally
-# scoped at top-level-only in the setup module because their contents are owned
-# by their respective writers (Home Assistant backups, Docker services). The
-# other-mode bits are 5 (r-x) to mirror the setup module's chmod 775 /
-# u=rwX,g=rwX,o=rX.
+# Optional homelab share (admin-only). config/, repo/, and images/ are included
+# because they can carry pre-existing content whose ownership predates the current
+# admin-write scheme (images/ holds VM images/ISOs originally created as root).
+# backup/ and appdata/ are intentionally omitted — their contents are owned by their
+# respective writers (Home Assistant backups, Docker services). The other-mode bits
+# are 5 (r-x) to mirror the setup module's chmod 775 / u=rwX,g=rwX,o=rX.
 if [ -n "${SMB_HOMELAB_PATH:-}" ]; then
     add_job "$SMB_HOMELAB_PATH/config" root admin "group:admin:rwx,mask::rwx" 5
     add_job "$SMB_HOMELAB_PATH/repo"   root admin "group:admin:rwx,mask::rwx" 5
+    add_job "$SMB_HOMELAB_PATH/images" root admin "group:admin:rwx,mask::rwx" 5
 fi
 
 # Filter by TARGET if given

@@ -162,6 +162,15 @@ if [ -n "${SMB_HOMELAB_PATH:-}" ]; then
     chown root:admin "$SMB_HOMELAB_PATH/appdata"
     chmod 775 "$SMB_HOMELAB_PATH/appdata"
 
+    # Images dir needs admin write access (VM images / ISOs deposited via SMB).
+    # A default ACL grants the admin group rwx on new content so images added over
+    # SMB inherit admin-write (mirrors the media share; the one-time recursive fix
+    # for pre-existing root-owned images lives in scripts/repair-share-acls.sh).
+    mkdir -p "$SMB_HOMELAB_PATH/images"
+    chown root:admin "$SMB_HOMELAB_PATH/images"
+    chmod 775 "$SMB_HOMELAB_PATH/images"
+    setfacl -d -m g:admin:rwx "$SMB_HOMELAB_PATH/images"
+
     # Repo dir needs admin read access (remote machines, e.g. a Raspberry Pi, source setup.sh
     # from the SMB-mounted repo via the svc service account, which is in the admin group).
     # Use capital X so non-executable files don't gain spurious execute bits — git tracks file modes.
