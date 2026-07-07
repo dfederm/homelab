@@ -14,12 +14,9 @@ services:
     devices:
       - '${ZWAVE_DEVICE}:/dev/zwave'
     volumes:
-      - zwave-config:/usr/src/app/store
+      - ${DOCKER_APPDATA_ROOT}/zwave:/usr/src/app/store
     ports:
       - '${ZWAVE_WEB_PORT}:8091'
       - '${ZWAVE_WS_PORT}:3000'
 networks:
   zwave:
-volumes:
-  zwave-config:
-    name: zwave-config
