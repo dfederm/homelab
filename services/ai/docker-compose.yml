@@ -136,6 +136,12 @@ services:
       - OAUTH_CLIENT_ID=open-webui
       - OAUTH_CLIENT_SECRET=${OPEN_WEBUI_OIDC_CLIENT_SECRET}
       - OAUTH_SCOPES=openid email profile
+      # Forward the signed-in user's identity to MCP/OpenAPI tools so a tool can act as that user
+      # (e.g. athena-mcp's per-user Vikunja tasks). Open WebUI mints a short-lived HS256 JWT in the
+      # `X-OpenWebUI-User-Jwt` header; athena-mcp verifies it with the SAME secret and maps the email
+      # to that user's backend token. Secret must match on both sides and be >=32 chars.
+      - ENABLE_FORWARD_USER_INFO_HEADERS=true
+      - FORWARD_USER_INFO_HEADER_JWT_SECRET=${OPEN_WEBUI_FORWARD_USER_JWT_SECRET}
     volumes:
       - ${DOCKER_APPDATA_ROOT}/open-webui:/app/backend/data
     ports:
@@ -208,7 +214,7 @@ services:
     # Pinned by tag AND digest (like forgejo/ollama). Renovate can't reach this private registry, so
     # bump both by hand: get the newest tag from the athena-mcp CI publish job summary and the digest
     # from that build's registry manifest.
-    image: ${CONTAINER_REGISTRY}/david/athena-mcp:0.1.7@sha256:65643b8be6e71cf45fd7e6cb967054b206cfbe2564570b5869c9006063b529e1
+    image: ${CONTAINER_REGISTRY}/david/athena-mcp:0.1.8@sha256:ec2624e42eed0c962e2b5842ccdad8115d53975d1b66c18bce44309d0991931f
     restart: unless-stopped
     environment:
       - TZ=${TZ}
@@ -235,6 +241,16 @@ services:
       # ApiToken is Koffan's REST token (reused from the koffan service's own KOFFAN_API_TOKEN).
       - Apps__Koffan__BaseUrl=http://${DOCKER_HOST_IP}:${KOFFAN_HTTP_PORT}
       - Apps__Koffan__ApiToken=${KOFFAN_API_TOKEN}
+      # Per-user Vikunja task tools (add_task/list_tasks/complete_task), gated by the forwarded
+      # identity above: the JWT is verified with the SAME secret, then the email maps to that user's
+      # Vikunja token. Anonymous-by-default + fail-closed, so read-only/Koffan tools are unaffected.
+      # Like Koffan, Vikunja is its own compose project, so reach it via the host's published port.
+      # Users are an indexed list (`@`/`.` are invalid in env-var names); add a person with one
+      # apollo.env pair + a new Users__N__ Email/ApiToken row.
+      - Identity__ForwardedUserJwtSecret=${OPEN_WEBUI_FORWARD_USER_JWT_SECRET}
+      - Apps__Vikunja__BaseUrl=http://${DOCKER_HOST_IP}:${VIKUNJA_HTTP_PORT}
+      - Apps__Vikunja__Users__0__Email=${ATHENA_MCP_VIKUNJA_USER_0_EMAIL}
+      - Apps__Vikunja__Users__0__ApiToken=${ATHENA_MCP_VIKUNJA_USER_0_TOKEN}
     networks:
       - ai
     healthcheck:
