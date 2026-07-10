@@ -23,8 +23,9 @@ services:
       - OLLAMA_MAX_LOADED_MODELS=${OLLAMA_MAX_LOADED_MODELS:-2}
       - OLLAMA_NUM_PARALLEL=${OLLAMA_NUM_PARALLEL:-1}
     volumes:
-      # Pulled models persist here so they survive container recreation.
-      - ${DOCKER_APPDATA_ROOT}/ollama:/root/.ollama
+      # Ollama data dir (models + cache). Point OLLAMA_MODELS_ROOT at a faster store
+      # (e.g. NVMe) to speed model loads; falls back to the ZFS-backed appdata dir.
+      - ${OLLAMA_MODELS_ROOT:-${DOCKER_APPDATA_ROOT}/ollama}:/root/.ollama
     ports:
       - '${OLLAMA_HTTP_PORT}:11434'
     networks:

@@ -105,6 +105,7 @@ Modules are standalone, idempotent scripts in `scripts/setup/modules/`. Each han
 | `install-docker` | Install Docker Engine from official apt repo | Docker LXC |
 | `install-samba` | Install Samba, generate smb.conf from env vars | NAS LXC |
 | `install-tools` | Install common utilities (git, jq, htop, curl) | All machines |
+| `provision-host-volumes` | Carve dedicated LVM-thin volumes out of the boot SSD's thin pool and mount them (`HOMELAB_HOST_VOLUMES`), e.g. a fast-NVMe Ollama model store bind-mounted into the Docker LXC | Proxmox host |
 | `set-share-permissions` | Apply POSIX ACLs on file share directories | NAS LXC |
 
 ### Cascade
@@ -117,6 +118,7 @@ setup.sh on Proxmox host
     install-beszel-agent, configure-storage-alerts
   → configure-storage-health (ZFS scrub + SMART self-tests + alerting), configure-scrutiny-collector
   → configure-lxc-fstrim (periodic thin-pool reclaim for LXC rootfs)
+  → provision-host-volumes (dedicated fast-NVMe volumes, e.g. the Ollama model store)
   → create-lxcs
     → creates Docker LXC (GPU passthrough if _GPU=1), then runs setup.sh inside it
       → create-users, install-tools, configure-ssh, install-docker, configure-docker-registry, configure-macvlan-bridge
@@ -404,8 +406,12 @@ pair) and the reusable per-app OIDC / forward-auth recipes are documented in
 `ai` Docker network: [Ollama](https://ollama.com) for local, CPU-based LLM serving, and
 [Open WebUI](https://openwebui.com) as the multi-user chat frontend in front of it.
 
-Ollama models are pulled into `${DOCKER_APPDATA_ROOT}/ollama` (ZFS-backed) so they
-survive container recreation. Ollama has **no authentication**, so it is never placed
+Ollama's data dir (pulled models + cache) is bind-mounted to `/root/.ollama` from
+`OLLAMA_MODELS_ROOT` so models survive container recreation. Point it at a faster
+store — e.g. an NVMe-backed volume carved by `provision-host-volumes` and bind-mounted
+into the Docker LXC via a `_MP*` entry — to speed up cold model loads (and let you relax
+`OLLAMA_KEEP_ALIVE`). Leave it blank to fall back to the ZFS-backed
+`${DOCKER_APPDATA_ROOT}/ollama`. Ollama has **no authentication**, so it is never placed
 behind the public reverse proxy — it is reachable only on the internal `ai` network (Open
 WebUI reaches it at `http://ollama:11434`) and, via `OLLAMA_HTTP_PORT`, on the LAN.
 
