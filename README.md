@@ -91,7 +91,6 @@ Modules are standalone, idempotent scripts in `scripts/setup/modules/`. Each han
 | `configure-pi-kiosk` | Set up Cage + Chromium kiosk browser pointing at a URL (Raspberry Pi specific) | Alarm panel Pi |
 | `configure-scrutiny-collector` | Install Scrutiny SMART collector (pinned binary) + timer; pushes drive health to the Scrutiny web UI | Proxmox host |
 | `configure-macvlan-bridge` | Persist macvlan bridge so host can reach macvlan containers | Docker LXC |
-| `configure-docker-registry` | Log the Docker host into the private OCI registry (`CONTAINER_REGISTRY`) so it can pull our self-published images (e.g. Athena MCP) | Docker LXC |
 | `configure-proxmox-repos` | Switch from paid enterprise repos to free community repos | Proxmox host |
 | `configure-smb-mount` | Mount NAS share via CIFS, persist in fstab | Remote machines |
 | `configure-lxc-fstrim` | Scheduled `pct fstrim` of LXC rootfs volumes (`LXC_FSTRIM_SCHEDULE`) so blocks freed inside containers return to the LVM thin pool | Proxmox host |
@@ -121,7 +120,7 @@ setup.sh on Proxmox host
   → provision-host-volumes (dedicated fast-NVMe volumes, e.g. the Ollama model store)
   → create-lxcs
     → creates Docker LXC (GPU passthrough if _GPU=1), then runs setup.sh inside it
-      → create-users, install-tools, configure-ssh, install-docker, configure-docker-registry, configure-macvlan-bridge
+      → create-users, install-tools, configure-ssh, install-docker, configure-macvlan-bridge
       → deploys HOMELAB_SERVICES (Jellyfin, Immich, Caddy, Scrutiny, monitoring, monitoring-agent, etc.)
     → creates NAS LXC, then runs setup.sh inside it
       → create-users, install-tools, configure-ssh, install-samba, set-share-permissions,
@@ -510,9 +509,15 @@ this client only.
 
 1. **Give the Docker host registry credentials** so it can pull the image. This is declarative: set
    `CONTAINER_REGISTRY`, `CONTAINER_REGISTRY_USER`, and `CONTAINER_REGISTRY_TOKEN` (a `package:read`
-   Forgejo PAT) in the NAS env, and add `configure-docker-registry` to the Docker host's
-   `HOMELAB_SETUP_MODULES` (after `install-docker`). Setup then runs `docker login` for you and
-   re-authenticates automatically after an LXC rebuild — no manual step to remember.
+   Forgejo PAT) in the NAS env. The `ai` stack's pre-deploy hook (`services/ai/pre-up.sh`) logs the
+   Docker host into the registry automatically right before it pulls `athena-mcp` — no manual
+   `docker login`, and it re-authenticates after an LXC rebuild.
+
+   > **Single-pass cold re-pave.** The registry is the Forgejo FQDN served through the reverse proxy
+   > (`dns` → `reverse-proxy` → `forgejo`). A setup module runs before any service and would deadlock
+   > a from-scratch re-pave, so the login lives in the `ai` pre-up hook instead. **List `dns`,
+   > `reverse-proxy`, and `forgejo` before `ai` in `HOMELAB_SERVICES`** so that path is up when the
+   > hook runs; a single `setup.sh` then converges with no manual steps.
 2. **Create a read-only Beszel user** and set `ATHENA_MCP_BESZEL_IDENTITY` / `_PASSWORD`
    (`_AUTH_COLLECTION` defaults to `users`; use `_superusers` only if a superuser is required to read
    every host). **Share each monitored host with this user** in Beszel, or it is silently missing from

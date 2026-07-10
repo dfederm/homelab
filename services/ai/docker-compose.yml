@@ -204,10 +204,8 @@ services:
   # never placed behind the public reverse proxy and publishes no host port — the `ai` network + LAN
   # is the trust boundary.
   # The image is our own, built + published by the athena-mcp repo's Forgejo CI (`dotnet publish
-  # -t:PublishContainer`, no Dockerfile) to our Forgejo OCI registry. It is PRIVATE, so the Docker
-  # host authenticates via the configure-docker-registry setup module (declarative `docker login`
-  # from CONTAINER_REGISTRY_USER/_TOKEN) before `docker compose pull` can fetch it (see the "Athena
-  # MCP" section in the root README).
+  # -t:PublishContainer`, no Dockerfile) to our Forgejo OCI registry. It is PRIVATE, so this stack's
+  # pre-up hook logs the host in (`docker login`) before the pull (see the "Athena MCP" section in the README).
   # `${CONTAINER_REGISTRY}` keeps the registry host out of this public repo; the image name + digest
   # stay in-repo (immutable, non-sensitive), pinning tag AND digest like the `forgejo`/`ollama` idiom.
   athena-mcp:
