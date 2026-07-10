@@ -315,6 +315,38 @@ var (`ZFS_SCRUB_SCHEDULE`, `ZFS_HEALTH_CHECK_SCHEDULE`, `SMART_SELFTEST_SCHEDULE
 (set it empty) to disable that specific feature** — the module then removes the
 corresponding timer. (smartd still runs for monitoring even with self-tests disabled.)
 
+## Rebuild & Restore
+
+LXC root filesystems are ephemeral — `setup.sh` can rebuild them from this repo at any time (the modules are idempotent, so a normal run just reconciles to the declared state rather than rebuilding), so there's no manual restore for them. VMs manage their own OS, so rebuilding the Home Assistant VM is a restore-from-backup flow with a few inherent manual steps that can't be captured declaratively.
+
+### Home Assistant (HAOS VM)
+
+On a rebuild, `create-vms` imports the pinned base image (`HAOS_VM_IMAGE`) into a fresh VM. Home Assistant boots clean, then you restore your configuration from a backup.
+
+- **Backups** are written by HA's auto-backup to the `backup/` directory of the `homelab` share on the NAS (ZFS-backed, so they survive a host or LXC rebuild). Restore the most recent one from the HA onboarding screen (or **Settings → System → Backups**).
+- Keep `HAOS_VM_IMAGE` reasonably current (see below). Restoring a backup onto a base whose Home Assistant Core is *older* than the backup can fail — a fresh base should be at least as new as the backup it will restore.
+
+**Manual steps after a rebuild** — these live outside HA backups *and* the repo, so set them by hand:
+
+1. **Re-set the static IP.** A fresh HAOS image boots on DHCP, and HA backups do not include HAOS host network settings, so the VM comes up on a DHCP address instead of its expected static IP. Re-apply the static IP in **Settings → System → Network** (this homelab configures static IPs client-side, inside the guest — not via router DHCP reservations), then confirm the VM is reachable at its expected address.
+2. **Re-set Samba passwords** on the NAS after a NAS LXC rebuild — Samba passwords aren't stored in the repo or env files. See [File Sharing & Permissions](#file-sharing--permissions) (`smbpasswd -a <username>`).
+
+### Refreshing the pinned HAOS image
+
+`HAOS_VM_IMAGE` pins the base image a rebuild imports. Refresh it periodically — e.g. alongside a major HA upgrade, or a couple of times a year — so a rebuild starts close to the running version instead of far behind (which also avoids the older-base restore-failure risk above):
+
+1. Find the latest release at <https://github.com/home-assistant/operating-system/releases> and note its `haos_ova-<version>.qcow2.xz` asset and that asset's published SHA256.
+2. Download it into the NAS images directory (admin-writable over SMB, or via the host/NAS shell), verify the checksum against the published digest, and decompress:
+   ```bash
+   cd <images_dir>/HomeAssistant
+   curl -fLO https://github.com/home-assistant/operating-system/releases/download/<version>/haos_ova-<version>.qcow2.xz
+   sha256sum haos_ova-<version>.qcow2.xz   # must match the release's published digest
+   xz -d haos_ova-<version>.qcow2.xz       # -> haos_ova-<version>.qcow2
+   ```
+3. Point `HAOS_VM_IMAGE` (in the host's env file) at the new `.qcow2`.
+
+`_IMAGE` is imported on **first VM create only**, so bumping the pin never touches the running VM — it only changes what a future rebuild starts from.
+
 ## Services
 
 Each service is a Docker Compose project in `services/<name>/`. All configuration is parameterized via env vars — no hardcoded domains, IPs, or paths in compose files.
