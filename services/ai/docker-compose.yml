@@ -213,7 +213,7 @@ services:
     # Pinned by tag AND digest (like forgejo/ollama). Renovate can't reach this private registry, so
     # bump both by hand: get the newest tag from the athena-mcp CI publish job summary and the digest
     # from that build's registry manifest.
-    image: ${CONTAINER_REGISTRY}/david/athena-mcp:0.1.8@sha256:ec2624e42eed0c962e2b5842ccdad8115d53975d1b66c18bce44309d0991931f
+    image: ${CONTAINER_REGISTRY}/david/athena-mcp:0.1.9@sha256:4d42255b64a06df8530b7cf3240cc08a3b0ef2c67398c9a55b18ec23a97b6691
     restart: unless-stopped
     environment:
       - TZ=${TZ}
@@ -250,6 +250,17 @@ services:
       - Apps__Vikunja__BaseUrl=http://${DOCKER_HOST_IP}:${VIKUNJA_HTTP_PORT}
       - Apps__Vikunja__Users__0__Email=${ATHENA_MCP_VIKUNJA_USER_0_EMAIL}
       - Apps__Vikunja__Users__0__ApiToken=${ATHENA_MCP_VIKUNJA_USER_0_TOKEN}
+      # Per-user calendar tools (list_events/add_event/delete_event), gated by the same forwarded
+      # identity: the JWT is verified, then the caller's email selects their Radicale HTTP Basic
+      # credentials. Radicale is its own compose project, so reach it via the host's published port
+      # (same-origin, not the public FQDN). BaseUrl is the DAV root (used to discover a user's personal
+      # calendar); FamilyCalendarUrl is the shared calendar's absolute URL. Users are an indexed list
+      # keyed by email (add a person with a matching set of env-file values + a new Users__N__ row).
+      - Apps__Radicale__BaseUrl=http://${DOCKER_HOST_IP}:${RADICALE_HTTP_PORT}
+      - Apps__Radicale__FamilyCalendarUrl=http://${DOCKER_HOST_IP}:${RADICALE_HTTP_PORT}/${ATHENA_MCP_RADICALE_FAMILY_CALENDAR_URL}
+      - Apps__Radicale__Users__0__Email=${ATHENA_MCP_RADICALE_USER_0_EMAIL}
+      - Apps__Radicale__Users__0__Username=${ATHENA_MCP_RADICALE_USER_0_USERNAME}
+      - Apps__Radicale__Users__0__Password=${ATHENA_MCP_RADICALE_USER_0_PASSWORD}
     networks:
       - ai
     healthcheck:
