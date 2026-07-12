@@ -91,6 +91,7 @@ Modules are standalone, idempotent scripts in `scripts/setup/modules/`. Each han
 | `configure-pi-kiosk` | Set up Cage + Chromium kiosk browser pointing at a URL (Raspberry Pi specific) | Alarm panel Pi |
 | `configure-scrutiny-collector` | Install Scrutiny SMART collector (pinned binary) + timer; pushes drive health to the Scrutiny web UI | Proxmox host |
 | `configure-macvlan-bridge` | Persist macvlan bridge so host can reach macvlan containers | Docker LXC |
+| `configure-network` | Pin a machine to a static IPv4 address (`STATIC_IP`) via NetworkManager | Remote machines |
 | `configure-proxmox-repos` | Switch from paid enterprise repos to free community repos | Proxmox host |
 | `configure-smb-mount` | Mount NAS share via CIFS, persist in fstab | Remote machines |
 | `configure-lxc-fstrim` | Scheduled `pct fstrim` of LXC rootfs volumes (`LXC_FSTRIM_SCHEDULE`) so blocks freed inside containers return to the LVM thin pool | Proxmox host |
@@ -194,6 +195,8 @@ Machines outside Proxmox (e.g. a Raspberry Pi) can't use ZFS bind mounts — the
 5. Add the machine to `HOMELAB_DEPLOY_TARGETS` in the webhook host's env file so future pushes deploy automatically
 
 After bootstrapping, the machine is fully managed — `dispatch.sh` will SSH into it and run `setup.sh` on every push to `main`, just like the Proxmox host and LXCs.
+
+**Pinning a static IP:** to give a remote machine a stable address, set `STATIC_IP` in its `<hostname>.env` and add `configure-network` to `HOMELAB_SETUP_MODULES` (list it first). The module reconciles the address on the connection carrying the default route — it works over Ethernet or WiFi and edits the existing connection in place, so WiFi credentials never leave the machine. It only persists the config; applying it live would drop the session `setup.sh` runs over, so the new address takes effect on the next **reboot** (or a manual `nmcli connection up`). Do the first pin on the device (or over its current address) and reboot, then set the matching `_DEPLOY_HOST` so future pushes reach it at the pinned IP.
 
 ### SSH Access
 
