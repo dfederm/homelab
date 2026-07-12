@@ -99,4 +99,11 @@ fi
 
 docker compose "${ENV_ARGS[@]}" pull
 docker compose "${ENV_ARGS[@]}" up $FORCE --remove-orphans --build -d
+
+# Optional post-deploy hook (runs after compose up), e.g. a one-time registration that needs the
+# container already running. CONFIG_DIR is exported by source_env. A non-zero exit aborts (set -e).
+if [ -f "$SERVICEPATH/post-up.sh" ]; then
+    bash "$SERVICEPATH/post-up.sh"
+fi
+
 docker image prune -f

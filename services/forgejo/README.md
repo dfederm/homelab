@@ -41,22 +41,41 @@ Sign in as admin and open `https://<FORGEJO_FQDN>/-/admin`:
 - The **Packages / container registry** is present (built-in, always on).
 - **Site Admin → Actions → Runners** shows **no runner yet** (this is what we're adding).
 
-#### 2. Register the runner with a shared secret
+#### 2. Add the runner's shared secret to the env file
 
 The runner uses the shared-secret model — a token from the web UI's "Create new Runner" does
-**not** work. Generate a 40-char hex secret, register it with Forgejo (idempotent), then store it:
+**not** work. Generate a 40-char hex secret and store it; registering it with Forgejo is automated
+(see below), so this is the only manual part:
 
 - Generate: `openssl rand -hex 20`.
-- Register it on the Forgejo side (in the Docker LXC), naming the runner:
-  ```bash
-  docker exec --user git forgejo forgejo forgejo-cli actions register --keep-labels --name <host> --secret <secret>
-  ```
 - On the NAS, add it to the Docker host's env file (e.g. `<hostname>.env`):
   ```
   FORGEJO_RUNNER_TOKEN=<secret>
   ```
   The runner derives the matching connection uuid from the secret and connects on start; nothing
   is consumed, so re-deploys keep working.
+
+**Registration is handled by `post-up.sh`.** On each `run-service.sh forgejo`, the hook runs the
+idempotent `forgejo-cli actions register` against the `forgejo` container, so you no longer run it by
+hand. It's a **post**-up hook (runs *after* `docker compose up`) so it converges in a single deploy
+for the normal cases: forgejo's `/data` lives on ZFS and persists across container/LXC repaves, so a
+repaved host boots an already-installed forgejo and the hook registers in that same deploy (the
+runner starts alongside, retries its connection, and attaches as soon as it lands). Every steady-state
+deploy re-registers idempotently.
+
+The one exception is a **brand-new forgejo with no persisted `/data`**: it boots *uninstalled* and
+serves the first-run wizard, and `forgejo-cli` refuses to register a runner until first-run setup is
+complete. That's forgejo's own bootstrap requirement (see step 1 — claim the admin account), not
+something a hook can skip. On that first install the hook detects the uninstalled state and skips with
+guidance; once you've claimed admin, the next deploy registers the runner. To register by hand (e.g.
+debugging), the underlying command is:
+```bash
+printf '%s' "$FORGEJO_RUNNER_TOKEN" | docker exec -i --user git forgejo \
+  forgejo forgejo-cli actions register --keep-labels --name <host> --secret-stdin=stdin
+```
+(The `--secret-stdin=stdin` value is a required placeholder — forgejo-cli treats the flag as
+value-expecting, so a bare `--secret-stdin` at the end of the line fails to parse; the value itself
+is ignored and the secret is read from stdin.)
 
 > No `HOMELAB_SERVICES` change is needed — the runner is part of the `forgejo` service, so it
 > deploys whenever `forgejo` does.
@@ -115,9 +134,9 @@ Then confirm:
 
 ### Day-2 notes
 
-- **Re-register from scratch:** the secret is reusable — just re-run the `forgejo-cli actions
-  register` from step 2 (idempotent) and redeploy. The generated `/data/config.yml` rebuilds on
-  start; remove it (and any stale `.runner`) if you change the secret.
+- **Re-register from scratch:** the secret is reusable — a re-register happens automatically on
+  every `run-service.sh forgejo` (the `post-up.sh` hook, idempotent). The generated `/data/config.yml`
+  rebuilds on start; remove it (and any stale `.runner`) if you change the secret.
 - **Changing runner labels / backend:** edit `runner-config.yaml`, then restart just the runner so
   it is re-read — this avoids bouncing the git host:
   ```bash
