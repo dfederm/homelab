@@ -37,6 +37,13 @@
         server: my-docker
         container: vikunja
 
+    - Koffan:
+        icon: mdi-cart
+        href: "{{HOMEPAGE_VAR_SHOPPING_URL}}"
+        description: Shopping list
+        server: my-docker
+        container: koffan
+
 - Infrastructure:
     - Home Assistant:
         icon: home-assistant.png
