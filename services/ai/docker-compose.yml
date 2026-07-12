@@ -213,7 +213,7 @@ services:
     # Pinned by tag AND digest (like forgejo/ollama). Renovate can't reach this private registry, so
     # bump both by hand: get the newest tag from the athena-mcp CI publish job summary and the digest
     # from that build's registry manifest.
-    image: ${CONTAINER_REGISTRY}/david/athena-mcp:0.1.9@sha256:4d42255b64a06df8530b7cf3240cc08a3b0ef2c67398c9a55b18ec23a97b6691
+    image: ${CONTAINER_REGISTRY}/david/athena-mcp:0.1.11@sha256:e8c0687a8e6f4768e6e2a849ec9aebfcc9ead5c588c62b9687c7884a94a4b5bf
     restart: unless-stopped
     environment:
       - TZ=${TZ}
@@ -258,6 +258,7 @@ services:
       # keyed by email (add a person with a matching set of env-file values + a new Users__N__ row).
       - Apps__Radicale__BaseUrl=http://${DOCKER_HOST_IP}:${RADICALE_HTTP_PORT}
       - Apps__Radicale__FamilyCalendarUrl=http://${DOCKER_HOST_IP}:${RADICALE_HTTP_PORT}/${ATHENA_MCP_RADICALE_FAMILY_CALENDAR_URL}
+      - Apps__Radicale__FamilyContactsUrl=http://${DOCKER_HOST_IP}:${RADICALE_HTTP_PORT}/${ATHENA_MCP_RADICALE_FAMILY_CONTACTS_URL}
       - Apps__Radicale__Users__0__Email=${ATHENA_MCP_RADICALE_USER_0_EMAIL}
       - Apps__Radicale__Users__0__Username=${ATHENA_MCP_RADICALE_USER_0_USERNAME}
       - Apps__Radicale__Users__0__Password=${ATHENA_MCP_RADICALE_USER_0_PASSWORD}
