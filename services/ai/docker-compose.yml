@@ -213,7 +213,7 @@ services:
     # Pinned by tag AND digest (like forgejo/ollama). Renovate can't reach this private registry, so
     # bump both by hand: get the newest tag from the athena-mcp CI publish job summary and the digest
     # from that build's registry manifest.
-    image: ${CONTAINER_REGISTRY}/david/athena-mcp:0.1.11@sha256:e8c0687a8e6f4768e6e2a849ec9aebfcc9ead5c588c62b9687c7884a94a4b5bf
+    image: ${CONTAINER_REGISTRY}/david/athena-mcp:0.1.13@sha256:8f68254af01e8387662616e0db334d1cb21e2ea3e20c092e59c4e0a7339711d0
     restart: unless-stopped
     environment:
       - TZ=${TZ}
@@ -262,6 +262,10 @@ services:
       - Apps__Radicale__Users__0__Email=${ATHENA_MCP_RADICALE_USER_0_EMAIL}
       - Apps__Radicale__Users__0__Username=${ATHENA_MCP_RADICALE_USER_0_USERNAME}
       - Apps__Radicale__Users__0__Password=${ATHENA_MCP_RADICALE_USER_0_PASSWORD}
+      # Read-only weather tools (get_current_weather/get_weather_forecast) over US NWS + OSM Nominatim
+      # (keyless, US-only). DefaultLocation is used when a caller omits a location; the base URLs have
+      # sensible in-app defaults, so no other weather config is required.
+      - Apps__Weather__DefaultLocation=${ATHENA_MCP_WEATHER_DEFAULT_LOCATION}
     networks:
       - ai
     healthcheck:
