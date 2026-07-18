@@ -213,7 +213,7 @@ services:
     # Pinned by tag AND digest (like forgejo/ollama). Renovate can't reach this private registry, so
     # bump both by hand: get the newest tag from the athena-mcp CI publish job summary and the digest
     # from that build's registry manifest.
-    image: ${CONTAINER_REGISTRY}/david/athena-mcp:0.1.13@sha256:8f68254af01e8387662616e0db334d1cb21e2ea3e20c092e59c4e0a7339711d0
+    image: ${CONTAINER_REGISTRY}/david/athena-mcp:0.1.17@sha256:813b7660e42d504bdaab0a442e1d768b684226bb9fd1aa43aaffb1a19840caeb
     restart: unless-stopped
     environment:
       - TZ=${TZ}
@@ -244,28 +244,93 @@ services:
       # identity above: the JWT is verified with the SAME secret, then the email maps to that user's
       # Vikunja token. Anonymous-by-default + fail-closed, so read-only/Koffan tools are unaffected.
       # Like Koffan, Vikunja is its own compose project, so reach it via the host's published port.
-      # Users are an indexed list (`@`/`.` are invalid in env-var names); add a person with one
-      # apollo.env pair + a new Users__N__ Email/ApiToken row.
+      # Users are an indexed list (`@`/`.` are invalid in env-var names) — up to 5 family slots (0-4) are
+      # pre-wired below. An unset/empty slot binds to an inert, fail-closed entry (no per-user cred, so
+      # it never matches a caller), so a member activates by setting their apollo.env creds and
+      # re-running the ai service to re-source env — no compose edit (or repo push) needed.
       - Identity__ForwardedUserJwtSecret=${OPEN_WEBUI_FORWARD_USER_JWT_SECRET}
       - Apps__Vikunja__BaseUrl=http://${DOCKER_HOST_IP}:${VIKUNJA_HTTP_PORT}
       - Apps__Vikunja__Users__0__Email=${ATHENA_MCP_VIKUNJA_USER_0_EMAIL}
       - Apps__Vikunja__Users__0__ApiToken=${ATHENA_MCP_VIKUNJA_USER_0_TOKEN}
+      - Apps__Vikunja__Users__1__Email=${ATHENA_MCP_VIKUNJA_USER_1_EMAIL}
+      - Apps__Vikunja__Users__1__ApiToken=${ATHENA_MCP_VIKUNJA_USER_1_TOKEN}
+      - Apps__Vikunja__Users__2__Email=${ATHENA_MCP_VIKUNJA_USER_2_EMAIL}
+      - Apps__Vikunja__Users__2__ApiToken=${ATHENA_MCP_VIKUNJA_USER_2_TOKEN}
+      - Apps__Vikunja__Users__3__Email=${ATHENA_MCP_VIKUNJA_USER_3_EMAIL}
+      - Apps__Vikunja__Users__3__ApiToken=${ATHENA_MCP_VIKUNJA_USER_3_TOKEN}
+      - Apps__Vikunja__Users__4__Email=${ATHENA_MCP_VIKUNJA_USER_4_EMAIL}
+      - Apps__Vikunja__Users__4__ApiToken=${ATHENA_MCP_VIKUNJA_USER_4_TOKEN}
       # Per-user calendar tools (list_events/add_event/delete_event), gated by the same forwarded
       # identity: the JWT is verified, then the caller's email selects their Radicale HTTP Basic
       # credentials. Radicale is its own compose project, so reach it via the host's published port
       # (same-origin, not the public FQDN). BaseUrl is the DAV root (used to discover a user's personal
       # calendar); FamilyCalendarUrl is the shared calendar's absolute URL. Users are an indexed list
-      # keyed by email (add a person with a matching set of env-file values + a new Users__N__ row).
+      # keyed by email — up to 5 family slots (0-4) are pre-wired below. An unset/empty slot binds to an
+      # inert, fail-closed entry, so a member activates by setting their apollo.env creds and re-running
+      # the ai service to re-source env — no compose edit (or repo push) needed.
       - Apps__Radicale__BaseUrl=http://${DOCKER_HOST_IP}:${RADICALE_HTTP_PORT}
       - Apps__Radicale__FamilyCalendarUrl=http://${DOCKER_HOST_IP}:${RADICALE_HTTP_PORT}/${ATHENA_MCP_RADICALE_FAMILY_CALENDAR_URL}
       - Apps__Radicale__FamilyContactsUrl=http://${DOCKER_HOST_IP}:${RADICALE_HTTP_PORT}/${ATHENA_MCP_RADICALE_FAMILY_CONTACTS_URL}
       - Apps__Radicale__Users__0__Email=${ATHENA_MCP_RADICALE_USER_0_EMAIL}
       - Apps__Radicale__Users__0__Username=${ATHENA_MCP_RADICALE_USER_0_USERNAME}
       - Apps__Radicale__Users__0__Password=${ATHENA_MCP_RADICALE_USER_0_PASSWORD}
+      - Apps__Radicale__Users__1__Email=${ATHENA_MCP_RADICALE_USER_1_EMAIL}
+      - Apps__Radicale__Users__1__Username=${ATHENA_MCP_RADICALE_USER_1_USERNAME}
+      - Apps__Radicale__Users__1__Password=${ATHENA_MCP_RADICALE_USER_1_PASSWORD}
+      - Apps__Radicale__Users__2__Email=${ATHENA_MCP_RADICALE_USER_2_EMAIL}
+      - Apps__Radicale__Users__2__Username=${ATHENA_MCP_RADICALE_USER_2_USERNAME}
+      - Apps__Radicale__Users__2__Password=${ATHENA_MCP_RADICALE_USER_2_PASSWORD}
+      - Apps__Radicale__Users__3__Email=${ATHENA_MCP_RADICALE_USER_3_EMAIL}
+      - Apps__Radicale__Users__3__Username=${ATHENA_MCP_RADICALE_USER_3_USERNAME}
+      - Apps__Radicale__Users__3__Password=${ATHENA_MCP_RADICALE_USER_3_PASSWORD}
+      - Apps__Radicale__Users__4__Email=${ATHENA_MCP_RADICALE_USER_4_EMAIL}
+      - Apps__Radicale__Users__4__Username=${ATHENA_MCP_RADICALE_USER_4_USERNAME}
+      - Apps__Radicale__Users__4__Password=${ATHENA_MCP_RADICALE_USER_4_PASSWORD}
       # Read-only weather tools (get_current_weather/get_weather_forecast) over US NWS + OSM Nominatim
       # (keyless, US-only). DefaultLocation is used when a caller omits a location; the base URLs have
       # sensible in-app defaults, so no other weather config is required.
       - Apps__Weather__DefaultLocation=${ATHENA_MCP_WEATHER_DEFAULT_LOCATION}
+      # Per-user media tools (search_media/list_new_media/list_resume_media/recommend_media) over the
+      # family Jellyfin, gated by the same forwarded identity: the JWT is verified, then the caller's
+      # email selects their Jellyfin ACCESS TOKEN — a per-user login-minted token, NOT a Dashboard
+      # "API Key" (those are server-wide admin tokens that bypass parental controls). Acting as the
+      # user is what makes "continue watching" and the kid-safe per-account library + parental-rating
+      # views correct. Jellyfin is its own compose project, so reach it via the host's published port.
+      # Users are an indexed list keyed by email — up to 5 family slots (0-4) are pre-wired below. An
+      # unset/empty slot binds to an inert, fail-closed entry, so a member activates by setting their
+      # apollo.env creds and re-running the ai service — no compose edit (or repo push) needed.
+      - Apps__Jellyfin__BaseUrl=http://${DOCKER_HOST_IP}:${JELLYFIN_HTTP_PORT}
+      - Apps__Jellyfin__Users__0__Email=${ATHENA_MCP_JELLYFIN_USER_0_EMAIL}
+      - Apps__Jellyfin__Users__0__AccessToken=${ATHENA_MCP_JELLYFIN_USER_0_TOKEN}
+      - Apps__Jellyfin__Users__1__Email=${ATHENA_MCP_JELLYFIN_USER_1_EMAIL}
+      - Apps__Jellyfin__Users__1__AccessToken=${ATHENA_MCP_JELLYFIN_USER_1_TOKEN}
+      - Apps__Jellyfin__Users__2__Email=${ATHENA_MCP_JELLYFIN_USER_2_EMAIL}
+      - Apps__Jellyfin__Users__2__AccessToken=${ATHENA_MCP_JELLYFIN_USER_2_TOKEN}
+      - Apps__Jellyfin__Users__3__Email=${ATHENA_MCP_JELLYFIN_USER_3_EMAIL}
+      - Apps__Jellyfin__Users__3__AccessToken=${ATHENA_MCP_JELLYFIN_USER_3_TOKEN}
+      - Apps__Jellyfin__Users__4__Email=${ATHENA_MCP_JELLYFIN_USER_4_EMAIL}
+      - Apps__Jellyfin__Users__4__AccessToken=${ATHENA_MCP_JELLYFIN_USER_4_TOKEN}
+      # Per-user photo-search tools (search_photos/count_photos/find_people) over the family Immich,
+      # gated by the same forwarded identity: the JWT is verified, then the caller's email selects
+      # their Immich API KEY (stamped as x-api-key) — a per-user least-privilege key (asset.read,
+      # asset.statistics, person.read). Metadata only — ids/dates/people/counts + a deep link, never
+      # image bytes. Immich is its own compose project, so BaseUrl reaches it via the host's published
+      # port; PublicBaseUrl is the browser-facing FQDN used only to build the clickable deep links.
+      # Users are an indexed list keyed by email — up to 5 family slots (0-4) are pre-wired below. An
+      # unset/empty slot binds to an inert, fail-closed entry, so a member activates by setting their
+      # apollo.env creds and re-running the ai service — no compose edit (or repo push) needed.
+      - Apps__Immich__BaseUrl=http://${DOCKER_HOST_IP}:${PHOTOS_HTTP_PORT}
+      - Apps__Immich__PublicBaseUrl=https://${PHOTOS_FQDN}
+      - Apps__Immich__Users__0__Email=${ATHENA_MCP_IMMICH_USER_0_EMAIL}
+      - Apps__Immich__Users__0__ApiKey=${ATHENA_MCP_IMMICH_USER_0_APIKEY}
+      - Apps__Immich__Users__1__Email=${ATHENA_MCP_IMMICH_USER_1_EMAIL}
+      - Apps__Immich__Users__1__ApiKey=${ATHENA_MCP_IMMICH_USER_1_APIKEY}
+      - Apps__Immich__Users__2__Email=${ATHENA_MCP_IMMICH_USER_2_EMAIL}
+      - Apps__Immich__Users__2__ApiKey=${ATHENA_MCP_IMMICH_USER_2_APIKEY}
+      - Apps__Immich__Users__3__Email=${ATHENA_MCP_IMMICH_USER_3_EMAIL}
+      - Apps__Immich__Users__3__ApiKey=${ATHENA_MCP_IMMICH_USER_3_APIKEY}
+      - Apps__Immich__Users__4__Email=${ATHENA_MCP_IMMICH_USER_4_EMAIL}
+      - Apps__Immich__Users__4__ApiKey=${ATHENA_MCP_IMMICH_USER_4_APIKEY}
     networks:
       - ai
     healthcheck:
