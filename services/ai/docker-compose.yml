@@ -143,6 +143,14 @@ services:
       # to that user's backend token. Secret must match on both sides and be >=32 chars.
       - ENABLE_FORWARD_USER_INFO_HEADERS=true
       - FORWARD_USER_INFO_HEADER_JWT_SECRET=${OPEN_WEBUI_FORWARD_USER_JWT_SECRET}
+      # OWUI mints this JWT once per chat turn (when it connects to the MCP server) and reuses it for
+      # every tool call in that turn without refreshing it mid-turn. The default TTL is 300s (5 min),
+      # so a turn that runs longer than that — easy with a large model on CPU — makes its later tool
+      # calls fail auth ("forwarded identity token failed validation"), leaving the request spinning.
+      # Raise the TTL to comfortably outlive any single turn (1 hour is plenty — the token only needs
+      # to span one turn, since OWUI tears the MCP connection down when the turn ends). Internal,
+      # ai-network-only identity token (never exposed publicly), so the exact value is not security-critical.
+      - FORWARD_USER_INFO_HEADER_JWT_EXPIRES_SECONDS=3600
     volumes:
       - ${DOCKER_APPDATA_ROOT}/open-webui:/app/backend/data
     ports:
