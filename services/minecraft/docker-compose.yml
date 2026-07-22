@@ -5,7 +5,7 @@ services:
   # this file — just add its name to the list and create its per-world env file.
   minecraft:
     container_name: minecraft-${MINECRAFT_INSTANCE}
-    image: itzg/minecraft-bedrock-server:2026.7.0@sha256:d9b4c6eb37d09651b4c6d97d72097d2534a25716023fb0fd9cf8d17814a6e90e
+    image: itzg/minecraft-bedrock-server:2026.7.3@sha256:45c8f292b289659c0be469b2eaaebfc1fbfefdf5c060a0df5ed53fe9e2e7c563
     restart: unless-stopped
     # stdin/tty keep the Bedrock console attachable (docker attach / send-command);
     # this is also how per-world init commands (gamerules) are applied after start.
