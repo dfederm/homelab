@@ -221,7 +221,7 @@ services:
     # Pinned by tag AND digest (like forgejo/ollama). Renovate can't reach this private registry, so
     # bump both by hand: get the newest tag from the athena-mcp CI publish job summary and the digest
     # from that build's registry manifest.
-    image: ${CONTAINER_REGISTRY}/david/athena-mcp:0.1.17@sha256:813b7660e42d504bdaab0a442e1d768b684226bb9fd1aa43aaffb1a19840caeb
+    image: ${CONTAINER_REGISTRY}/david/athena-mcp:0.1.19@sha256:98170ea4bcd585019afd5d5173eebcc6a28873d9d4c5c0b8a6a4c50cfd014772
     restart: unless-stopped
     environment:
       - TZ=${TZ}
@@ -303,11 +303,14 @@ services:
       # email selects their Jellyfin ACCESS TOKEN — a per-user login-minted token, NOT a Dashboard
       # "API Key" (those are server-wide admin tokens that bypass parental controls). Acting as the
       # user is what makes "continue watching" and the kid-safe per-account library + parental-rating
-      # views correct. Jellyfin is its own compose project, so reach it via the host's published port.
+      # views correct. Jellyfin is its own compose project, so BaseUrl reaches it via the host's
+      # published port; PublicBaseUrl is the browser-facing FQDN used only to build the clickable deep
+      # links returned by the media tools (null/omitted → no link).
       # Users are an indexed list keyed by email — up to 5 family slots (0-4) are pre-wired below. An
       # unset/empty slot binds to an inert, fail-closed entry, so a member activates by setting their
       # apollo.env creds and re-running the ai service — no compose edit (or repo push) needed.
       - Apps__Jellyfin__BaseUrl=http://${DOCKER_HOST_IP}:${JELLYFIN_HTTP_PORT}
+      - Apps__Jellyfin__PublicBaseUrl=https://${JELLYFIN_FQDN}
       - Apps__Jellyfin__Users__0__Email=${ATHENA_MCP_JELLYFIN_USER_0_EMAIL}
       - Apps__Jellyfin__Users__0__AccessToken=${ATHENA_MCP_JELLYFIN_USER_0_TOKEN}
       - Apps__Jellyfin__Users__1__Email=${ATHENA_MCP_JELLYFIN_USER_1_EMAIL}
