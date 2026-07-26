@@ -12,7 +12,9 @@ set -euo pipefail
 source "$REPO_DIR/scripts/lib.sh"
 
 echo "Configuring AMD GPU..."
-ensure_kernel_module amdgpu
+# A missing driver is reported via the /dev/dri check below, so a failed load
+# must not abort the setup run.
+ensure_kernel_module amdgpu || true
 
 if [ -d /dev/dri ]; then
     echo "  /dev/dri found:"

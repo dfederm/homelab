@@ -23,13 +23,19 @@ echo "Configuring sensors..."
 apt-get update -qq > /dev/null
 apt-get install -y -qq lm-sensors > /dev/null
 
+MISSING=0
+
 for kmod in ${SENSORS_KERNEL_MODULES:-}; do
-    ensure_kernel_module "$kmod"
+    ensure_kernel_module "$kmod" || MISSING=$((MISSING + 1))
 done
 
-# Every chip block in `sensors` output carries an Adapter: line.
+# Chip count alone can look healthy while the requested driver is missing —
+# autoloading chips (CPU, NVMe) report regardless — so failures are called out
+# on their own.
 CHIP_COUNT=$(sensors 2>/dev/null | grep -c '^Adapter:' || true)
-if [ "$CHIP_COUNT" -gt 0 ]; then
+if [ "$MISSING" -gt 0 ]; then
+    echo "  WARNING: $MISSING requested module(s) not loaded — readings are incomplete ($CHIP_COUNT chip(s) reporting)"
+elif [ "$CHIP_COUNT" -gt 0 ]; then
     echo "  $CHIP_COUNT sensor chip(s) reporting"
 else
     echo "  WARNING: no sensor chips reporting. Reboot may be required."

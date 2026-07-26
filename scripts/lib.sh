@@ -16,8 +16,11 @@ validate_env() {
 }
 
 # Ensure a kernel module is loaded now and on every boot (via /etc/modules).
-# Idempotent: only appends to /etc/modules when the module isn't listed, and
-# warns rather than failing when it can't be loaded (a reboot may be needed).
+# Idempotent: only appends to /etc/modules when the module isn't listed.
+#
+# Returns non-zero (after warning) if the module still isn't loaded afterwards,
+# so callers can report degraded state instead of silently continuing. Callers
+# running under `set -e` must handle that explicitly.
 #
 # Usage: ensure_kernel_module "amdgpu"
 ensure_kernel_module() {
@@ -28,14 +31,24 @@ ensure_kernel_module() {
     if grep -qE "^[[:space:]]*${kmod}([[:space:]]|$)" /etc/modules 2>/dev/null; then
         echo "  $kmod already in /etc/modules"
     else
+        # A file whose last line is unterminated would otherwise absorb the new
+        # entry into it.
+        if [ -s /etc/modules ] && [ -n "$(tail -c 1 /etc/modules)" ]; then
+            echo "" >> /etc/modules
+        fi
         echo "$kmod" >> /etc/modules
         echo "  Added $kmod to /etc/modules"
     fi
 
-    if modprobe "$kmod"; then
+    modprobe "$kmod" || true
+
+    # /sys/module covers built-in modules too, which lsmod does not list. The
+    # kernel reports names with underscores regardless of how they're spelled.
+    if [ -d "/sys/module/${kmod//-/_}" ]; then
         echo "  $kmod loaded"
     else
-        echo "  WARNING: Could not load $kmod (may need reboot)"
+        echo "  WARNING: $kmod is not loaded (may need reboot)"
+        return 1
     fi
 }
 
