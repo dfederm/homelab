@@ -442,6 +442,15 @@ First-run setup notes:
   access) until approved.
 - Switch tool calling to **Native** mode (the prompt-injection "Default" mode is deprecated)
   per model that needs tools.
+- **Chat runs over the OpenAI-compatible connection, not the native Ollama one.** Ollama serves an
+  OpenAI-compatible API at `/v1`, and Open WebUI is pointed at it
+  (`ENABLE_OPENAI_API=true`, `OPENAI_API_BASE_URL=http://ollama:11434/v1`) because Open WebUI's
+  Ollama code path mangles turns that return multiple tool calls, while its OpenAI one handles them.
+  Same server, same models — only the handler differs. The base URL must always stay on the local
+  Ollama; unpinning it would default Open WebUI to `api.openai.com`. The native Ollama connection
+  remains enabled for RAG embeddings and model management. These are PersistentConfig values, so on
+  an already-deployed instance also set them in Admin Settings → Connections, and select the
+  OpenAI-connection copy of the model in the chat.
 - `OPEN_WEBUI_TASK_MODEL` seeds a small/fast task model (e.g. `qwen2.5:7b`) for
   title/tag/query generation so the large chat model isn't burned on trivia; it can be
   changed later in the UI (it is a first-launch-seeded "PersistentConfig" value).

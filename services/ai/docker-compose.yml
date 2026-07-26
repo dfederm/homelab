@@ -72,10 +72,11 @@ services:
   # Its SQLite DB + ChromaDB (per-user chats, settings, RAG vectors) persist on ZFS-backed
   # appdata so they survive container recreation.
   # NOTE: many of these env vars (OLLAMA_BASE_URL, WEBUI_URL, TASK_MODEL, ENABLE_OPENAI_API,
-  # ENABLE_SIGNUP, DEFAULT_USER_ROLE, RAG_EMBEDDING_*) are "PersistentConfig" — read on first
-  # launch then stored in the DB (config.json). After the first deploy they are managed in the
-  # UI/DB, so changing them here later has no effect unless the data volume is wiped. They seed
-  # sane first-run defaults.
+  # OPENAI_API_BASE_URL, OPENAI_API_KEY, ENABLE_SIGNUP, DEFAULT_USER_ROLE, RAG_EMBEDDING_*) are
+  # "PersistentConfig" — read on first launch then stored in the DB. After the first deploy they
+  # are managed in the UI/DB, so changing them here later has no effect unless the data volume is
+  # wiped. They seed sane first-run defaults; on an existing instance the same change must ALSO be
+  # made in Admin Settings -> Connections.
   open-webui:
     container_name: open-webui
     image: ghcr.io/open-webui/open-webui:v0.10.2@sha256:9fcea9c6e32ab60b0498f3986c6cdf651ddbe61db48d2213a3d28048ddd673d4
@@ -88,8 +89,22 @@ services:
       - OLLAMA_BASE_URL=http://ollama:11434
       # Public URL, used for share links / OAuth redirects / notifications.
       - WEBUI_URL=https://${OPEN_WEBUI_FQDN}
-      # Internal-only stack: don't reach out to OpenAI, only the local Ollama.
-      - ENABLE_OPENAI_API=false
+      # Chat traffic goes through Open WebUI's OpenAI-compatible client, pointed at the SAME local
+      # Ollama's /v1 endpoint (Ollama serves an OpenAI-compatible API alongside its native one).
+      # Reason: Open WebUI's Ollama-specific middleware mangles a turn that returns MULTIPLE tool
+      # calls (it concatenates them into one malformed call), which makes athena-mcp error out and
+      # the chat hang. Its OpenAI code path handles multi-tool turns correctly. Same server, same
+      # model — just the working handler.
+      # ⚠️ OPENAI_API_BASE_URL MUST stay pinned at the local Ollama. Enabling the OpenAI API without
+      # it makes Open WebUI default to https://api.openai.com — i.e. family chats leaving the house.
+      # This stack never talks to an external model provider; do not "clean up" this URL.
+      # OPENAI_API_KEY is a placeholder: Ollama ignores it, but the client requires a non-empty value.
+      - ENABLE_OPENAI_API=true
+      - OPENAI_API_BASE_URL=http://ollama:11434/v1
+      - OPENAI_API_KEY=ollama
+      # The native Ollama connection stays enabled: RAG_EMBEDDING_ENGINE=ollama below uses it for
+      # embeddings (a separate code path, unaffected by the tool-call bug), and it keeps the model
+      # list/pull management in the UI working. Chat is what moves to the OpenAI connection.
       # Family instance: no public self-registration — the admin provisions each account
       # (Admin Settings -> Users -> Add User). NOTE: the very first account to register still
       # becomes the admin (initial-admin signup intentionally bypasses this flag), so create
