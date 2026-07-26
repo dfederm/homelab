@@ -52,6 +52,66 @@ ensure_kernel_module() {
     fi
 }
 
+# Whether a kernel command line already contains an exact parameter.
+#
+# Compared token-wise: "iommu=pt" is not present merely because the command line
+# contains "amd_iommu=on", and "iommu=soft" does not satisfy "iommu=pt".
+#
+# Usage: cmdline_has_param "$(cat /proc/cmdline)" "iommu=pt"
+cmdline_has_param() {
+    local cmdline="$1"
+    local wanted="$2"
+    local token
+    local -a tokens=()
+
+    read -ra tokens <<< "$cmdline"
+    for token in "${tokens[@]}"; do
+        if [ "$token" = "$wanted" ]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Merge parameters into a kernel command line and echo the result.
+#
+# A parameter whose key is already present is replaced where it stands, and any
+# later duplicate of that key is dropped — two values for one key is a
+# silent-misconfiguration trap. Parameters not already present are appended.
+#
+# One value per key, so this is not for keys the kernel accepts more than once
+# (console=, cgroup_enable=). Existing ones are left alone; just don't pass them.
+#
+# Usage: merge_cmdline_params "quiet iommu=soft" iommu=pt
+merge_cmdline_params() {
+    local cmdline="$1"
+    shift
+    local -a tokens=()
+    read -ra tokens <<< "$cmdline"
+
+    local wanted key token placed
+    local -a result
+    for wanted in "$@"; do
+        key="${wanted%%=*}"
+        result=()
+        placed=0
+        for token in "${tokens[@]}"; do
+            if [ "${token%%=*}" != "$key" ]; then
+                result+=("$token")
+            elif [ "$placed" -eq 0 ]; then
+                result+=("$wanted")
+                placed=1
+            fi
+        done
+        if [ "$placed" -eq 0 ]; then
+            result+=("$wanted")
+        fi
+        tokens=("${result[@]}")
+    done
+
+    echo "${tokens[*]}"
+}
+
 # Resolve the env file and config directory, then source common.env
 # (shared vars) followed by the machine-specific env file (overrides).
 # Creates /etc/homelab.env symlink so future runs need no arguments.

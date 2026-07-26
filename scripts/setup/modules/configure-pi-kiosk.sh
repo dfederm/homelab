@@ -162,10 +162,12 @@ fi
 # Persist console-blank-disable in cmdline.txt.
 # On Trixie/Bookworm Pi images, the active path is /boot/firmware/cmdline.txt.
 CMDLINE_FILE="/boot/firmware/cmdline.txt"
-if [ -f "$CMDLINE_FILE" ] && ! grep -q "consoleblank=0" "$CMDLINE_FILE"; then
+if [ -f "$CMDLINE_FILE" ]; then
     current=$(tr -d '\n' < "$CMDLINE_FILE")
-    printf "%s consoleblank=0\n" "$current" > "$CMDLINE_FILE"
-    echo "Added consoleblank=0 to $CMDLINE_FILE"
+    if ! cmdline_has_param "$current" consoleblank=0; then
+        printf '%s\n' "$(merge_cmdline_params "$current" consoleblank=0)" > "$CMDLINE_FILE"
+        echo "Set consoleblank=0 in $CMDLINE_FILE"
+    fi
 fi
 
 echo "Kiosk ready"

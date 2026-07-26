@@ -88,6 +88,7 @@ Modules are standalone, idempotent scripts in `scripts/setup/modules/`. Each han
 | Module | Purpose | Typical machines |
 |--------|---------|-----------------|
 | `configure-amdgpu` | Load AMD GPU kernel driver for hardware transcoding | Proxmox host |
+| `configure-kernel-cmdline` | Ensure the kernel parameters this machine needs (`KERNEL_CMDLINE_PARAMS`, e.g. `iommu=pt`) are set in whichever bootloader config the host actually boots from (`/etc/kernel/cmdline` or `/etc/default/grub`). Never reboots; reports when one is pending | Proxmox host |
 | `configure-pi-kiosk` | Set up Cage + Chromium kiosk browser pointing at a URL (Raspberry Pi specific) | Alarm panel Pi |
 | `configure-scrutiny-collector` | Install Scrutiny SMART collector (pinned binary) + timer; pushes drive health to the Scrutiny web UI | Proxmox host |
 | `configure-macvlan-bridge` | Persist macvlan bridge so host can reach macvlan containers | Docker LXC |
@@ -116,7 +117,7 @@ The `create-lxcs` module doesn't just create containers — after creation, it r
 ```
 setup.sh on Proxmox host
   → configure-proxmox-repos, install-tools, configure-amdgpu, configure-sensors,
-    configure-ssh, install-beszel-agent, configure-storage-alerts
+    configure-kernel-cmdline, configure-ssh, install-beszel-agent, configure-storage-alerts
   → configure-storage-health (ZFS scrub + SMART self-tests + alerting), configure-scrutiny-collector
   → configure-lxc-fstrim (periodic thin-pool reclaim for LXC rootfs)
   → provision-host-volumes (dedicated fast-NVMe volumes, e.g. the Ollama model store)
