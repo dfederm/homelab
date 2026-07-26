@@ -66,8 +66,8 @@ esac
 ASSET="scrutiny-collector-metrics-linux-${ARCH}"
 
 # The collector shells out to smartctl; jq parses the GitHub release metadata.
-apt-get update -qq > /dev/null
-apt-get install -y -qq smartmontools curl jq > /dev/null
+apt_get update -qq > /dev/null
+apt_get install -y -qq smartmontools curl jq > /dev/null
 
 # (Re)install the binary only when the desired version differs from what's installed.
 installed_version=""

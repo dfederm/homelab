@@ -41,7 +41,7 @@ esac
 
 echo "Configuring kiosk..."
 
-apt-get install -y -qq cage chromium wlr-randr wlrctl > /dev/null
+apt_get install -y -qq cage chromium wlr-randr wlrctl > /dev/null
 
 # Kiosk user — shell must be /bin/bash (not nologin) so autologin establishes a
 # real seat0 session for cage to inherit.

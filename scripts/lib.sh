@@ -15,6 +15,91 @@ validate_env() {
     done
 }
 
+# Run apt-get, waiting out another process that holds an apt lock.
+#
+# Do not "simplify" this into `-o DPkg::Lock::Timeout=N`. That option is read
+# only by debSystem::Lock(), which guards the dpkg locks. The lists lock
+# (/var/lib/apt/lists/lock, taken by `update`) and the archives lock
+# (/var/cache/apt/archives/lock, taken by `install`) are both acquired by
+# pkgAcquire::GetLock() via a non-blocking fcntl(F_SETLK) that fails instantly
+# and consults no configuration. apt has never shipped an option that makes
+# those two wait, so the waiting has to happen out here. The option is still
+# passed below, since it does cover the dpkg half of an install — with the
+# caveat that apt then does that wait internally, so a dpkg-lock collision is
+# absorbed silently rather than reported by the retry notices below.
+#
+# This matters because a Proxmox host runs several randomized apt-touching
+# timers (apt-daily, apt-daily-upgrade, pve-daily-update), and pve-daily-update
+# is Persistent=yes — a window missed while the machine was off is caught up
+# shortly after boot, which is exactly when a rebuild deploy tends to run. A
+# collision of a few seconds is enough to abort the whole setup cascade.
+#
+# apt-get exits 100 for every failure, so the exit status says nothing about
+# whether waiting would help. Retrying is gated on apt's contention messages
+# instead. Note the deliberately narrow match: "Unable to lock directory" is NOT
+# one of them, because apt emits it for a permission error too, and retrying
+# that would spend the whole budget hiding a real fault.
+#
+# stdout is left alone, so callers keep whatever redirection they already had.
+# stderr is captured to match against, then replayed — including on success, so
+# apt warnings still reach the journal. Retry notices go to stderr as well,
+# since callers routinely send this function's stdout to /dev/null.
+#
+# Env vars:
+#   APT_LOCK_TIMEOUT  (optional, default 120) seconds to keep retrying for. It
+#                     bounds when the last retry may *start*, so a run can
+#                     overshoot it by one backoff interval.
+#
+# Usage: apt_get install -y -qq curl > /dev/null
+apt_get() {
+    local timeout="${APT_LOCK_TIMEOUT:-120}"
+    if ! [[ "$timeout" =~ ^[0-9]+$ ]]; then
+        # Left unchecked this silently becomes 0 in the arithmetic below, i.e. no
+        # retries at all — the exact failure this function exists to prevent.
+        echo "  WARNING: APT_LOCK_TIMEOUT is not a number ('$timeout'), using 120" >&2
+        timeout=120
+    fi
+    local deadline=$(( $(date +%s) + timeout ))
+    local delay=2
+    local attempt=1
+    local errfile status
+    errfile=$(mktemp) || return 1
+
+    while true; do
+        status=0
+        # LC_ALL=C so the messages matched below are apt's untranslated originals.
+        LC_ALL=C apt-get -o DPkg::Lock::Timeout="$timeout" "$@" 2> "$errfile" || status=$?
+
+        if [ "$status" -eq 0 ]; then
+            break
+        fi
+
+        # "Could not get lock" is the lists/archives contention message and is
+        # not emitted for permission failures (those say "Could not open lock
+        # file"). "is another process using it" is the dpkg-lock equivalent,
+        # whose permanent counterpart reads "are you root?".
+        if ! grep -qE 'Could not get lock|is another process using it' "$errfile"; then
+            break
+        fi
+
+        if [ "$(date +%s)" -ge "$deadline" ]; then
+            echo "  apt-get $*: apt lock still held after ${timeout}s, giving up" >&2
+            break
+        fi
+
+        echo "  apt-get $*: apt lock held by another process, retrying in ${delay}s (attempt $attempt)" >&2
+        sleep "$delay"
+        attempt=$(( attempt + 1 ))
+        if [ "$delay" -lt 30 ]; then
+            delay=$(( delay * 2 ))
+        fi
+    done
+
+    cat "$errfile" >&2
+    rm -f "$errfile"
+    return "$status"
+}
+
 # Ensure a kernel module is loaded now and on every boot (via /etc/modules).
 # Idempotent: only appends to /etc/modules when the module isn't listed.
 #

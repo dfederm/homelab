@@ -91,8 +91,8 @@ remove_unit() {
 # --- smartmontools / smartd: drive monitoring (+ scheduled self-tests if enabled) ---
 
 echo "Installing smartmontools..."
-apt-get update -qq > /dev/null
-apt-get install -y -qq smartmontools > /dev/null
+apt_get update -qq > /dev/null
+apt_get install -y -qq smartmontools > /dev/null
 
 # Include the self-test schedule directive only when one is configured.
 SMART_SELFTEST_DIRECTIVE=""

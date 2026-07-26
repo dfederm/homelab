@@ -68,8 +68,8 @@ fi
 # Ensure download tools exist (apt skips already-installed packages).
 # jq parses the GitHub release metadata for the per-asset digest.
 if ! command -v curl &>/dev/null || ! command -v tar &>/dev/null || ! command -v jq &>/dev/null; then
-    apt-get update -qq > /dev/null
-    apt-get install -y -qq curl tar jq > /dev/null
+    apt_get update -qq > /dev/null
+    apt_get install -y -qq curl tar jq > /dev/null
 fi
 
 # Dedicated unprivileged service user.

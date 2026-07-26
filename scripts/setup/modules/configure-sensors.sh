@@ -20,8 +20,8 @@ set -euo pipefail
 source "$REPO_DIR/scripts/lib.sh"
 
 echo "Configuring sensors..."
-apt-get update -qq > /dev/null
-apt-get install -y -qq lm-sensors > /dev/null
+apt_get update -qq > /dev/null
+apt_get install -y -qq lm-sensors > /dev/null
 
 MISSING=0
 

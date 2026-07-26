@@ -9,13 +9,24 @@
 
 set -euo pipefail
 
+SCRIPT=$(readlink -f "$0")
+REPO_DIR=$(dirname "$(dirname "$SCRIPT")")
+export REPO_DIR
+
+source "$REPO_DIR/scripts/lib.sh"
+
 lxcs_needing_restart=()
+
+# Not every LXC has the repo mounted, so the apt-get wrapper is sent in with the command.
+lxc_update="APT_LOCK_TIMEOUT=$(printf '%q' "${APT_LOCK_TIMEOUT:-}")
+$(declare -f apt_get)
+apt_get update -qq && apt_get full-upgrade -y"
 
 # Update LXCs first — if host upgrade requires a reboot, LXCs are already done
 for vmid in $(pct list 2>/dev/null | awk 'NR>1 && $2=="running" {print $1}'); do
     name=$(pct list | awk -v id="$vmid" '$1==id {print $3}')
     echo "=== Updating LXC $vmid ($name) ==="
-    pct exec "$vmid" -- bash -c "apt-get update -qq && apt-get full-upgrade -y"
+    pct exec "$vmid" -- bash -c "$lxc_update"
     if pct exec "$vmid" -- test -f /var/run/reboot-required 2>/dev/null; then
         lxcs_needing_restart+=("$vmid")
     fi
@@ -23,8 +34,8 @@ for vmid in $(pct list 2>/dev/null | awk 'NR>1 && $2=="running" {print $1}'); do
 done
 
 echo "=== Updating host: $(hostname) ==="
-apt-get update -qq
-apt-get full-upgrade -y
+apt_get update -qq
+apt_get full-upgrade -y
 echo ""
 
 if [ -f /var/run/reboot-required ]; then

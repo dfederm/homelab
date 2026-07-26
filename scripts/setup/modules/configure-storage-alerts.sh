@@ -46,8 +46,8 @@ ensure_shoutrrr() {
         return 0
     fi
     if ! command -v jq &>/dev/null || ! command -v curl &>/dev/null || ! command -v tar &>/dev/null; then
-        apt-get update -qq >/dev/null
-        apt-get install -y -qq jq curl tar >/dev/null
+        apt_get update -qq >/dev/null
+        apt_get install -y -qq jq curl tar >/dev/null
     fi
     local repo="nicholas-fedor/shoutrrr"
     local tag="v${SHOUTRRR_VERSION}"

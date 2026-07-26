@@ -31,8 +31,8 @@ if [ ! -f "$SMB_GLOBAL" ]; then
 fi
 
 # Install (idempotent — apt-get skips already installed)
-apt-get update -qq > /dev/null
-apt-get install -y -qq samba samba-common-bin acl > /dev/null
+apt_get update -qq > /dev/null
+apt_get install -y -qq samba samba-common-bin acl > /dev/null
 
 # Build user lists by group membership.
 # Admin membership is group-based and applies to everyone, so a service account

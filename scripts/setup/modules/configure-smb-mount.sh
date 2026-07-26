@@ -18,7 +18,7 @@ validate_env SMB_SHARE SMB_MOUNT_POINT SMB_CREDENTIALS_FILE SMB_USERNAME SMB_PAS
 echo "Configuring SMB mount..."
 
 # Install cifs-utils (idempotent — apt-get skips already installed)
-apt-get install -y -qq cifs-utils > /dev/null
+apt_get install -y -qq cifs-utils > /dev/null
 
 # Create/update credentials file
 DESIRED_CREDS="username=${SMB_USERNAME}

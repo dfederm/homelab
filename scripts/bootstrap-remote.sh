@@ -29,6 +29,9 @@ SMB_PASSWORD="${SMB_PASSWORD:?SMB_PASSWORD must be set}"
 echo "=== Bootstrap: $MACHINE_HOSTNAME ==="
 
 # Install cifs-utils
+# Bare apt-get: the repo isn't mounted yet, so lib.sh's apt_get wrapper (which
+# retries past apt lock contention) isn't reachable from here. This script is
+# run by hand once per machine, so a lock collision just means running it again.
 echo "Installing cifs-utils..."
 apt-get update -qq > /dev/null
 apt-get install -y -qq cifs-utils > /dev/null

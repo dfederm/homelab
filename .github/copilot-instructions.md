@@ -28,7 +28,7 @@ Proxmox VE host (Debian)
 
 - All scripts use `set -euo pipefail`.
 - All setup modules **must be idempotent** — running them twice produces the same result with no unnecessary restarts or side effects.
-- Source `$REPO_DIR/scripts/lib.sh` for shared helpers (e.g. `validate_env`).
+- Source `$REPO_DIR/scripts/lib.sh` for shared helpers (e.g. `validate_env`, `apt_get`).
 - Use `validate_env` to assert required env vars at the top of each module.
 - Env vars use a **prefix-based pattern**: a space-separated list of prefixes (e.g. `HOMELAB_LXCS="DOCKER_LXC NAS_LXC"`), and each prefix has associated vars (`DOCKER_LXC_VMID`, `DOCKER_LXC_IP`, etc.). Use bash indirect expansion (`${!var_name}`) to access them.
 
@@ -39,7 +39,7 @@ When writing or modifying setup modules, use these established patterns:
 1. **Config file comparison (cmp)**: Generate desired config to a temp file, compare with existing, only replace + restart if different. Used by `install-samba`, `configure-macvlan-bridge`.
 2. **Grep-before-append**: Check if a line exists before appending to a config file. Used for `lxc.*` entries in `create-lxcs` GPU passthrough.
 3. **Config field comparison**: For `pct set`/`qm set`, parse current config and compare field-by-field against desired values. Strip auto-generated fields (hwaddr, type in net0 for LXCs; MAC address for VMs). Only apply + restart if something actually changed.
-4. **apt-get install -y -qq**: apt skips already-installed packages. No explicit check needed.
+4. **`apt_get install -y -qq`**: use `lib.sh`'s `apt_get` wrapper, never bare `apt-get` — it retries past apt lock contention from the host's background update timers, which would otherwise abort the whole setup run. apt skips already-installed packages, so no explicit check is needed.
 
 ### Docker Compose Services
 
@@ -70,10 +70,11 @@ When writing or modifying setup modules, use these established patterns:
 3. Start with `set -euo pipefail` and `source "$REPO_DIR/scripts/lib.sh"`
 4. Document required env vars in the file header comment
 5. Use `validate_env` for required vars
-6. Make it idempotent — check before modifying, log what changed vs what was already correct
-7. Add to the module table and cascade diagram in `README.md`
-8. Add to `.env.template` if new env vars are needed
-9. The module is activated by adding its name to `HOMELAB_SETUP_MODULES` in a machine's env file
+6. Install packages with `apt_get`, not bare `apt-get`
+7. Make it idempotent — check before modifying, log what changed vs what was already correct
+8. Add to the module table and cascade diagram in `README.md`
+9. Add to `.env.template` if new env vars are needed
+10. The module is activated by adding its name to `HOMELAB_SETUP_MODULES` in a machine's env file
 
 ## When Creating New Docker Services
 

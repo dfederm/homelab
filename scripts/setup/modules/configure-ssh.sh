@@ -7,12 +7,17 @@
 #   2. <config_dir>/authorized_keys  (next to machine .env files)
 #
 # If no authorized keys file is found, SSH is hardened but key deployment is skipped.
+#
+# Env vars:
+#   REPO_DIR  (required, set by setup.sh) repo path on this host
 
 set -euo pipefail
 
+source "$REPO_DIR/scripts/lib.sh"
+
 echo "Configuring SSH..."
 
-apt-get install -y -qq openssh-server > /dev/null
+apt_get install -y -qq openssh-server > /dev/null
 
 # Harden SSH via drop-in config (Debian 12+ includes sshd_config.d/*.conf by default)
 cat > /etc/ssh/sshd_config.d/99-homelab.conf <<'EOF'
