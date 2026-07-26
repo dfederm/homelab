@@ -37,7 +37,7 @@ fi
 # verified against GitHub's published per-asset sha256 digest. Best-effort: a
 # failure here does NOT fail the deploy - the check falls back to syslog meanwhile.
 # renovate: datasource=github-releases depName=nicholas-fedor/shoutrrr
-SHOUTRRR_VERSION="0.16.1"
+SHOUTRRR_VERSION="0.16.2"
 ensure_shoutrrr() {
     local bin="/usr/local/bin/shoutrrr"
     local marker="/usr/local/bin/.shoutrrr-version"
