@@ -15,6 +15,30 @@ validate_env() {
     done
 }
 
+# Ensure a kernel module is loaded now and on every boot (via /etc/modules).
+# Idempotent: only appends to /etc/modules when the module isn't listed, and
+# warns rather than failing when it can't be loaded (a reboot may be needed).
+#
+# Usage: ensure_kernel_module "amdgpu"
+ensure_kernel_module() {
+    local kmod="$1"
+
+    # Match the module name as its own field — /etc/modules lines may carry
+    # trailing module parameters.
+    if grep -qE "^[[:space:]]*${kmod}([[:space:]]|$)" /etc/modules 2>/dev/null; then
+        echo "  $kmod already in /etc/modules"
+    else
+        echo "$kmod" >> /etc/modules
+        echo "  Added $kmod to /etc/modules"
+    fi
+
+    if modprobe "$kmod"; then
+        echo "  $kmod loaded"
+    else
+        echo "  WARNING: Could not load $kmod (may need reboot)"
+    fi
+}
+
 # Resolve the env file and config directory, then source common.env
 # (shared vars) followed by the machine-specific env file (overrides).
 # Creates /etc/homelab.env symlink so future runs need no arguments.

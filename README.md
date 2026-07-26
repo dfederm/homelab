@@ -93,6 +93,7 @@ Modules are standalone, idempotent scripts in `scripts/setup/modules/`. Each han
 | `configure-macvlan-bridge` | Persist macvlan bridge so host can reach macvlan containers | Docker LXC |
 | `configure-network` | Pin a machine to a static IPv4 address (`STATIC_IP`) via NetworkManager | Remote machines |
 | `configure-proxmox-repos` | Switch from paid enterprise repos to free community repos | Proxmox host |
+| `configure-sensors` | Install lm-sensors and persist the hwmon kernel modules for the board's Super I/O chip (`SENSORS_KERNEL_MODULES`), so fan speeds and board temperatures are readable | Bare-metal hosts |
 | `configure-smb-mount` | Mount NAS share via CIFS, persist in fstab | Remote machines |
 | `configure-lxc-fstrim` | Scheduled `pct fstrim` of LXC rootfs volumes (`LXC_FSTRIM_SCHEDULE`) so blocks freed inside containers return to the LVM thin pool | Proxmox host |
 | `configure-ssh` | Harden SSH (key-only auth) and deploy authorized keys | All machines |
@@ -114,8 +115,8 @@ The `create-lxcs` module doesn't just create containers — after creation, it r
 
 ```
 setup.sh on Proxmox host
-  → configure-proxmox-repos, install-tools, configure-amdgpu, configure-ssh,
-    install-beszel-agent, configure-storage-alerts
+  → configure-proxmox-repos, install-tools, configure-amdgpu, configure-sensors,
+    configure-ssh, install-beszel-agent, configure-storage-alerts
   → configure-storage-health (ZFS scrub + SMART self-tests + alerting), configure-scrutiny-collector
   → configure-lxc-fstrim (periodic thin-pool reclaim for LXC rootfs)
   → provision-host-volumes (dedicated fast-NVMe volumes, e.g. the Ollama model store)

@@ -5,19 +5,14 @@
 # immediately via modprobe. Creates /dev/dri/* which is needed for GPU
 # passthrough to LXCs.
 #
-# No env vars required.
+# No env vars required (REPO_DIR is set by setup.sh).
 
 set -euo pipefail
 
-echo "Configuring AMD GPU..."
-if ! grep -q "^amdgpu" /etc/modules 2>/dev/null; then
-    echo "amdgpu" >> /etc/modules
-    echo "  Added amdgpu to /etc/modules"
-else
-    echo "  amdgpu already in /etc/modules"
-fi
+source "$REPO_DIR/scripts/lib.sh"
 
-modprobe amdgpu || echo "  WARNING: Could not load amdgpu module (may need reboot)"
+echo "Configuring AMD GPU..."
+ensure_kernel_module amdgpu
 
 if [ -d /dev/dri ]; then
     echo "  /dev/dri found:"
