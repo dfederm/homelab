@@ -22,6 +22,14 @@ services:
       # thinking) resident at once. Override per-machine (e.g. raise on a GPU host) via the env file.
       - OLLAMA_MAX_LOADED_MODELS=${OLLAMA_MAX_LOADED_MODELS:-2}
       - OLLAMA_NUM_PARALLEL=${OLLAMA_NUM_PARALLEL:-1}
+      # Server-side default context window. This is load-bearing, not a tuning knob: Open WebUI
+      # talks to the OpenAI-compatible /v1 endpoint (see the open-webui service below), and the
+      # OpenAI protocol has no per-request context field — a model's num_ctx set in the Open WebUI
+      # UI is silently dropped. Without this, every request falls back to Ollama's 4096 default,
+      # and a tool-enabled model overflows it on the system prompt + tool schemas alone
+      # ("request exceeds the available context size"). Applies to every model Ollama loads, so it
+      # costs KV-cache RAM per resident model; weigh against OLLAMA_MAX_LOADED_MODELS.
+      - OLLAMA_CONTEXT_LENGTH=${OLLAMA_CONTEXT_LENGTH:-32768}
     volumes:
       # Ollama data dir (models + cache). Point OLLAMA_MODELS_ROOT at a faster store
       # (e.g. NVMe) to speed model loads; falls back to the ZFS-backed appdata dir.
