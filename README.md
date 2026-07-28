@@ -93,6 +93,7 @@ Modules are standalone, idempotent scripts in `scripts/setup/modules/`. Each han
 | `configure-scrutiny-collector` | Install Scrutiny SMART collector (pinned binary) + timer; pushes drive health to the Scrutiny web UI | Proxmox host |
 | `configure-macvlan-bridge` | Persist macvlan bridge so host can reach macvlan containers | Docker LXC |
 | `configure-network` | Pin a machine to a static IPv4 address (`STATIC_IP`) via NetworkManager | Remote machines |
+| `configure-nvidia-driver` | Install the NVIDIA driver from NVIDIA's CUDA apt repo (open kernel modules via DKMS, headless userspace only), blacklist the in-tree drivers, and create the device nodes at boot before guests start. Verifies DKMS actually built for the running kernel; never reboots, reports when one is pending | Proxmox host |
 | `configure-proxmox-repos` | Switch from paid enterprise repos to free community repos | Proxmox host |
 | `configure-sensors` | Install lm-sensors and persist the hwmon kernel modules for the board's Super I/O chip (`SENSORS_KERNEL_MODULES`), so fan speeds and board temperatures are readable | Bare-metal hosts |
 | `configure-smb-mount` | Mount NAS share via CIFS, persist in fstab | Remote machines |
@@ -120,6 +121,7 @@ setup.sh on Proxmox host
     configure-kernel-cmdline, configure-ssh, install-beszel-agent, configure-storage-alerts
   → configure-storage-health (ZFS scrub + SMART self-tests + alerting), configure-scrutiny-collector
   → configure-lxc-fstrim (periodic thin-pool reclaim for LXC rootfs)
+  → configure-nvidia-driver (NVIDIA driver + device nodes)
   → provision-host-volumes (dedicated fast-NVMe volumes, e.g. the Ollama model store)
   → create-lxcs
     → creates Docker LXC (GPU passthrough if _GPU=1), then runs setup.sh inside it
@@ -130,6 +132,10 @@ setup.sh on Proxmox host
         install-beszel-agent
   → create-vms (Home Assistant)
 ```
+
+Module order matters. `configure-nvidia-driver` must come before `create-lxcs`, for the
+same reason `configure-amdgpu` does: a passthrough step can only pass device nodes that
+already exist.
 
 One command. Everything configured.
 
