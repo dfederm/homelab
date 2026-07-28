@@ -16,6 +16,7 @@
 #
 # Optional env vars per prefix:
 #   _GPU (set to 1 to pass through /dev/dri for hardware transcoding)
+#   _NVIDIA_GPU (set to 1 to pass through /dev/nvidia* for CUDA workloads)
 #   _USB_DEVICES (space-separated host device paths to pass through, typically
 #                 by-id symlinks, e.g. /dev/serial/by-id/usb-Zooz_800_Z-Wave_Stick_...-if00)
 #
@@ -74,6 +75,99 @@ configure_gpu_passthrough() {
 
     if [ "$changed" = true ]; then
         echo "  GPU passthrough configured"
+        return 0
+    fi
+    return 1
+}
+
+# Add NVIDIA GPU passthrough entries to the LXC config if _NVIDIA_GPU=1.
+# Kept separate from _GPU — that one passes /dev/dri for integrated-GPU
+# transcoding, and the two are independent: a host can have either, both, or
+# neither, and an integrated-GPU-only host must be unaffected by this.
+#
+# Device majors are read off the device nodes themselves with stat, the same way
+# configure_usb_passthrough does it, rather than being hardcoded or looked up by
+# name. Neither shortcut survives contact with reality: the per-GPU nodes sit at
+# a fixed major but nvidia-uvm and nvidia-caps are assigned one dynamically when
+# the driver loads, and the names /proc/devices uses for them differ between
+# driver versions (the main node has been listed as both "nvidia" and
+# "nvidia-frontend"). Reading the nodes that are actually there sidesteps both.
+#
+# Returns 0 if config was changed, 1 if already configured or skipped.
+configure_nvidia_passthrough() {
+    local vmid="$1"
+    local prefix="$2"
+    local nvidia_var="${prefix}_NVIDIA_GPU"
+
+    [ "${!nvidia_var:-0}" != "1" ] && return 1
+
+    # These nodes are created when something first opens the driver, not at
+    # boot, so finding none here usually means the host-side setup hasn't run
+    # yet rather than that the driver is missing.
+    local -a nodes=()
+    local node
+    for node in /dev/nvidia*; do
+        if [ -e "$node" ]; then
+            nodes+=("$node")
+        fi
+    done
+
+    if [ "${#nodes[@]}" -eq 0 ]; then
+        echo "  WARNING: ${prefix}_NVIDIA_GPU=1 but no /dev/nvidia* devices found — skipping"
+        echo "  Ensure the NVIDIA driver is installed and loaded (e.g. configure-nvidia-driver)"
+        return 1
+    fi
+
+    local conf="/etc/pve/lxc/${vmid}.conf"
+    local changed=false
+
+    # /dev/nvidia-caps is a directory of character devices on its own major, so
+    # the majors have to come from the leaf nodes, not just the top level.
+    local -a devnodes=()
+    for node in "${nodes[@]}"; do
+        if [ -d "$node" ]; then
+            local child
+            for child in "$node"/*; do
+                [ -c "$child" ] && devnodes+=("$child")
+            done
+        elif [ -c "$node" ]; then
+            devnodes+=("$node")
+        fi
+    done
+
+    local seen_majors=" "
+    local devnode major_hex major
+    for devnode in "${devnodes[@]}"; do
+        major_hex=$(stat -c '%t' "$devnode" 2>/dev/null) || continue
+        [ -n "$major_hex" ] || continue
+        major=$((16#$major_hex))
+        case "$seen_majors" in
+            *" $major "*) continue ;;
+        esac
+        seen_majors="$seen_majors$major "
+        if ! grep -q "lxc.cgroup2.devices.allow: c $major:" "$conf"; then
+            echo "lxc.cgroup2.devices.allow: c $major:* rwm" >> "$conf"
+            changed=true
+        fi
+    done
+
+    # /dev/nvidia-caps is a directory; the rest are character devices.
+    for node in "${nodes[@]}"; do
+        if ! grep -qF "lxc.mount.entry: $node " "$conf"; then
+            local nodename create
+            nodename=$(basename "$node")
+            if [ -d "$node" ]; then
+                create="dir"
+            else
+                create="file"
+            fi
+            echo "lxc.mount.entry: $node dev/$nodename none bind,optional,create=$create" >> "$conf"
+            changed=true
+        fi
+    done
+
+    if [ "$changed" = true ]; then
+        echo "  NVIDIA passthrough configured: ${nodes[*]}"
         return 0
     fi
     return 1
@@ -229,6 +323,11 @@ create_or_update_lxc() {
             needs_restart=true
         fi
 
+        # NVIDIA GPU passthrough — apply before restart
+        if configure_nvidia_passthrough "$vmid" "$label"; then
+            needs_restart=true
+        fi
+
         # USB passthrough — apply before restart
         if configure_usb_passthrough "$vmid" "$label"; then
             needs_restart=true
@@ -251,6 +350,9 @@ create_or_update_lxc() {
 
         # GPU passthrough — entries applied before first start
         configure_gpu_passthrough "$vmid" "$label" || true
+
+        # NVIDIA GPU passthrough — entries applied before first start
+        configure_nvidia_passthrough "$vmid" "$label" || true
 
         # USB passthrough — entries applied before first start
         configure_usb_passthrough "$vmid" "$label" || true
