@@ -5,7 +5,7 @@ services:
   # just add its name to the list and create its per-target env file.
   rclone:
     container_name: backup-${BACKUP_INSTANCE}
-    image: rclone/rclone:1.74.3@sha256:623378ad0ff3ebd5cebf77720843c0e02edfe46e2d5b5ac6bed54c6371780dfb
+    image: rclone/rclone:1.74.4@sha256:c61954aaa32328a5486715dd063a81c7879f5195ad3505cd362deddd509dc4a1
     restart: unless-stopped
     tty: true
     environment:
