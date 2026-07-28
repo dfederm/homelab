@@ -48,6 +48,8 @@
 #                         and reports it, which is fine for a single host but
 #                         drifts apart from a container's userspace over time —
 #                         so pin it once both sides are up.
+#   NVIDIA_POWER_LIMIT_WATTS (optional) per-GPU power cap re-applied on every
+#                         boot. Empty leaves the cards at their stock limit.
 
 set -euo pipefail
 
@@ -154,6 +156,14 @@ if [ "$GPU_COUNT" -eq 0 ]; then
         "Remove the module from this machine's env file, or check that the card is seated."
 fi
 echo "  Found $GPU_COUNT NVIDIA GPU(s)"
+
+# Rejected here rather than by nvidia-smi at boot, where it would surface as a
+# failed unit long after the change was made.
+if [ -n "${NVIDIA_POWER_LIMIT_WATTS:-}" ] \
+    && ! [[ "$NVIDIA_POWER_LIMIT_WATTS" =~ ^[0-9]+$ ]]; then
+    die "NVIDIA_POWER_LIMIT_WATTS must be a whole number of watts" \
+        "Got: $NVIDIA_POWER_LIMIT_WATTS"
+fi
 
 # NVIDIA publishes one repository per Debian release, and they are signed by
 # different keys, so the release has to be resolved rather than assumed.
@@ -306,7 +316,25 @@ fi
 
 # --- Install the driver ------------------------------------------------------
 
+# Captured either side of the install so the boot-time settings below can be
+# re-applied when the driver actually moved. An upgrade reloads the modules,
+# which drops persistence mode and the power cap with them. The install state is
+# read alongside the version because a removed-but-not-purged package still
+# reports one, which would read as "unchanged".
+installed_driver_version() {
+    local status_version
+    status_version=$(dpkg-query -W -f='${db:Status-Status} ${Version}' nvidia-driver-cuda 2>/dev/null || true)
+    case "$status_version" in
+        "installed "*) printf '%s' "${status_version#installed }" ;;
+        *) printf '' ;;
+    esac
+}
+
+INSTALLED_BEFORE=$(installed_driver_version)
 apt_get install -y -qq dkms "${NVIDIA_PKGS[@]}" > /dev/null
+INSTALLED_AFTER=$(installed_driver_version)
+DRIVER_CHANGED=0
+[ "$INSTALLED_BEFORE" != "$INSTALLED_AFTER" ] && DRIVER_CHANGED=1
 echo "  Installed: ${NVIDIA_PKGS[*]}"
 
 # --- Verify DKMS actually produced a module ----------------------------------
@@ -348,9 +376,11 @@ modinfo -k "$RUNNING_KERNEL" nvidia_uvm > /dev/null 2>&1 \
 # afterwards works. Hence the ordering against pve-guests.service, which is what
 # starts Proxmox guests at boot.
 #
-# Second, persistence mode keeps the driver resident, so the device nodes
-# survive the last process exiting. nvidia-persistenced is the supported way to
-# hold that state, so it does that job and this unit does the rest.
+# Second, persistence mode keeps the driver resident, so the device nodes and
+# the power cap survive the last process exiting — without it a cap set at boot
+# is quietly lost the first time the driver has no clients. nvidia-persistenced
+# is the supported way to hold that state, so it does that job and this unit
+# does the rest.
 UNIT_CONTENT="\
 # Managed by the configure-nvidia-driver setup module.
 [Unit]
@@ -372,16 +402,29 @@ RemainAfterExit=yes
 ExecStart=/usr/bin/nvidia-smi -pm 1
 # Creates /dev/nvidia-uvm and /dev/nvidia-uvm-tools, which exist only once
 # something has opened the driver.
-ExecStart=/usr/bin/nvidia-modprobe -u
+ExecStart=/usr/bin/nvidia-modprobe -u"
+
+# Ordered last on purpose: a power value the driver rejects must not stop the
+# device nodes above from being created, which is the part guests depend on.
+if [ -n "${NVIDIA_POWER_LIMIT_WATTS:-}" ]; then
+    UNIT_CONTENT="$UNIT_CONTENT
+# Power cap. Deliberately -pl and not -lgc: locking clocks isn't portable
+# across GPU generations, whereas a power cap is.
+ExecStart=/usr/bin/nvidia-smi -pl $NVIDIA_POWER_LIMIT_WATTS"
+fi
+
+UNIT_CONTENT="$UNIT_CONTENT
 
 [Install]
 WantedBy=multi-user.target"
 
+UNIT_CHANGED=0
 if write_if_changed "$UNIT_FILE" "$UNIT_CONTENT"; then
+    UNIT_CHANGED=1
     systemctl daemon-reload
-    echo "  Wrote $UNIT_NAME"
+    echo "  Wrote $UNIT_NAME${NVIDIA_POWER_LIMIT_WATTS:+ (power limit ${NVIDIA_POWER_LIMIT_WATTS}W)}"
 else
-    echo "  $UNIT_NAME already up to date"
+    echo "  $UNIT_NAME already up to date${NVIDIA_POWER_LIMIT_WATTS:+ (power limit ${NVIDIA_POWER_LIMIT_WATTS}W)}"
 fi
 
 if systemctl list-unit-files nvidia-persistenced.service > /dev/null 2>&1; then
@@ -398,12 +441,36 @@ if intree_driver_loaded; then
     echo "  REBOOT REQUIRED to take effect: in-tree driver still bound to the GPUs"
     echo "  After reboot, GPU-consuming containers need a restart to pick up the device nodes"
 elif [ -d /sys/module/nvidia ]; then
-    # Safe to start now — the driver is already the one bound to the cards.
-    systemctl start "$UNIT_NAME" > /dev/null 2>&1 \
-        || echo "  WARNING: $UNIT_NAME failed to start; check systemctl status $UNIT_NAME"
+    # Safe to act now — the driver is already the one bound to the cards.
+    #
+    # The unit is a oneshot with RemainAfterExit, so a plain start is a no-op
+    # once it has run. Reloading the driver clears persistence mode and the
+    # power cap, so a version change has to re-run it rather than assume the
+    # settings from the last boot are still in force.
+    if [ "$DRIVER_CHANGED" -eq 1 ] || [ "$UNIT_CHANGED" -eq 1 ]; then
+        SETTINGS_ACTION=restart
+    else
+        SETTINGS_ACTION=start
+    fi
+    systemctl "$SETTINGS_ACTION" "$UNIT_NAME" > /dev/null 2>&1 \
+        || echo "  WARNING: $UNIT_NAME failed to $SETTINGS_ACTION; check systemctl status $UNIT_NAME"
     echo "  Active in the running kernel: nvidia $BUILT_VERSION"
     nvidia-smi --query-gpu=index,name,driver_version,power.limit \
         --format=csv,noheader 2>/dev/null | sed 's/^/    /' || true
+
+    # Read the cap back instead of trusting that the unit succeeded. systemd
+    # accepts any value here; only the driver knows whether it is within the
+    # card's supported range, and it rejects it at the point of use.
+    if [ -n "${NVIDIA_POWER_LIMIT_WATTS:-}" ]; then
+        while read -r gpu_index gpu_limit; do
+            [ -n "$gpu_index" ] || continue
+            if [ "${gpu_limit%%.*}" != "$NVIDIA_POWER_LIMIT_WATTS" ]; then
+                echo "  WARNING: GPU $gpu_index power limit reads ${gpu_limit}W, expected ${NVIDIA_POWER_LIMIT_WATTS}W"
+                echo "           Check the supported range with: nvidia-smi -q -d POWER"
+            fi
+        done < <(nvidia-smi --query-gpu=index,power.limit \
+                     --format=csv,noheader,nounits 2>/dev/null | tr -d ',')
+    fi
 else
     echo "  REBOOT REQUIRED to take effect: nvidia module built but not loaded"
 fi
