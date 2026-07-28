@@ -106,6 +106,7 @@ Modules are standalone, idempotent scripts in `scripts/setup/modules/`. Each han
 | `create-users` | Create Linux users/groups with aligned UIDs across machines | Docker LXC, NAS LXC |
 | `install-beszel-agent` | Install the Beszel monitoring agent natively (binary + systemd) on hosts without Docker | Proxmox host, NAS LXC |
 | `install-docker` | Install Docker Engine from official apt repo | Docker LXC |
+| `install-nvidia-container-toolkit` | Install the userspace NVIDIA driver (matching the host's `NVIDIA_DRIVER_VERSION`) plus the NVIDIA Container Toolkit, so Docker containers can use GPUs passed into the LXC | Docker LXC |
 | `install-samba` | Install Samba, generate smb.conf from env vars | NAS LXC |
 | `install-tools` | Install common utilities (git, jq, htop, curl) | All machines |
 | `provision-host-volumes` | Carve dedicated LVM-thin volumes out of the boot SSD's thin pool and mount them (`HOMELAB_HOST_VOLUMES`), e.g. a fast-NVMe Ollama model store bind-mounted into the Docker LXC | Proxmox host |
@@ -125,7 +126,8 @@ setup.sh on Proxmox host
   → provision-host-volumes (dedicated fast-NVMe volumes, e.g. the Ollama model store)
   → create-lxcs
     → creates Docker LXC (GPU passthrough if _GPU=1, NVIDIA if _NVIDIA_GPU=1), then runs setup.sh inside it
-      → create-users, install-tools, configure-ssh, install-docker, configure-macvlan-bridge
+      → create-users, install-tools, configure-ssh, install-docker, configure-macvlan-bridge,
+        install-nvidia-container-toolkit
       → deploys HOMELAB_SERVICES (Jellyfin, Immich, Caddy, Scrutiny, monitoring, monitoring-agent, etc.)
     → creates NAS LXC, then runs setup.sh inside it
       → create-users, install-tools, configure-ssh, install-samba, set-share-permissions,
@@ -135,7 +137,8 @@ setup.sh on Proxmox host
 
 Module order matters. `configure-nvidia-driver` must come before `create-lxcs`, for the
 same reason `configure-amdgpu` does: a passthrough step can only pass device nodes that
-already exist.
+already exist. Inside the LXC, `install-nvidia-container-toolkit` must come after
+`install-docker`.
 
 One command. Everything configured.
 
@@ -413,8 +416,21 @@ pair) and the reusable per-app OIDC / forward-auth recipes are documented in
 ### AI (Ollama + Open WebUI)
 
 `services/ai/` runs the family AI stack as a single compose project on the shared internal
-`ai` Docker network: [Ollama](https://ollama.com) for local, CPU-based LLM serving, and
+`ai` Docker network: [Ollama](https://ollama.com) for local LLM serving, and
 [Open WebUI](https://openwebui.com) as the multi-user chat frontend in front of it.
+
+Ollama serves on the CPU by default. On a machine with NVIDIA GPUs it can use them
+instead, which is a per-machine env-file decision rather than a compose change: set
+`OLLAMA_RUNTIME=nvidia` and `OLLAMA_NVIDIA_VISIBLE_DEVICES=all` (or a comma-separated index
+list, to leave some cards for another workload). That requires the GPUs to have reached
+Docker first — on a Proxmox host that means `configure-nvidia-driver` on the hypervisor,
+`_NVIDIA_GPU=1` on the LXC, and `install-nvidia-container-toolkit` inside it. Those are all
+setup modules, which `setup.sh` runs before deploying any service, so a rebuilt machine
+wires itself up in the right order. Setting the runtime without the toolkit in place fails
+the container at start rather than falling back to CPU — deliberately, since a GPU-sized
+model quietly running on the CPU is far more expensive to notice than a failed deploy.
+`OLLAMA_MAX_LOADED_MODELS` / `OLLAMA_NUM_PARALLEL` / `OLLAMA_CONTEXT_LENGTH` are tuned for
+CPU serving and are worth revisiting once weights live in VRAM.
 
 Ollama's data dir (pulled models + cache) is bind-mounted to `/root/.ollama` from
 `OLLAMA_MODELS_ROOT` so models survive container recreation. Point it at a faster

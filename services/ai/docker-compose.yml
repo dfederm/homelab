@@ -12,8 +12,18 @@ services:
     container_name: ollama
     image: ollama/ollama:0.31.1@sha256:f1a705f2bd113fb8d15f85f7c217f0dc5f6bebda6b0cc42b82c3ad165ffcb9dc
     restart: unless-stopped
+    # GPU access, off unless the machine's env file turns it on. A host with
+    # NVIDIA GPUs sets OLLAMA_RUNTIME=nvidia and OLLAMA_NVIDIA_VISIBLE_DEVICES=all,
+    # and the NVIDIA container toolkit injects the driver and device nodes at
+    # start. The defaults below are the stock runtime with no devices, so a
+    # CPU-only host — or a GPU host whose driver isn't up yet — serves on the CPU.
+    runtime: ${OLLAMA_RUNTIME:-runc}
     environment:
       - TZ=${TZ}
+      # Empty means "no GPUs", which is what makes the default safe.
+      - NVIDIA_VISIBLE_DEVICES=${OLLAMA_NVIDIA_VISIBLE_DEVICES:-}
+      # Inference needs CUDA (compute) and nvidia-smi (utility); no graphics.
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
       - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE}
       # Cap resident models + parallelism. Defaults (2 / 1) suit CPU serving: they stop large MoE
       # weights (~17 GB each) stacking in RAM and thrashing (KEEP_ALIVE=24h otherwise pins every
