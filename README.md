@@ -98,6 +98,7 @@ Modules are standalone, idempotent scripts in `scripts/setup/modules/`. Each han
 | `configure-sensors` | Install lm-sensors and persist the hwmon kernel modules for the board's Super I/O chip (`SENSORS_KERNEL_MODULES`), so fan speeds and board temperatures are readable | Bare-metal hosts |
 | `configure-smb-mount` | Mount NAS share via CIFS, persist in fstab | Remote machines |
 | `configure-lxc-fstrim` | Scheduled `pct fstrim` of LXC rootfs volumes (`LXC_FSTRIM_SCHEDULE`) so blocks freed inside containers return to the LVM thin pool | Proxmox host |
+| `configure-docker-image-prune` | Scheduled removal of Docker images no container references (`DOCKER_IMAGE_PRUNE_SCHEDULE`), reclaiming the superseded images left behind by digest bumps | Docker LXC |
 | `configure-ssh` | Harden SSH (key-only auth) and deploy authorized keys | All machines |
 | `configure-storage-alerts` | Periodic threshold alerts for LVM thin-pool + ZFS pool capacity (the storage Beszel can't see) | Proxmox host |
 | `configure-storage-health` | Schedule monthly ZFS scrubs + daily pool health check + SMART self-tests (smartd), with degradation alerting | Proxmox host |
@@ -128,6 +129,7 @@ setup.sh on Proxmox host
     → creates Docker LXC (GPU passthrough if _GPU=1, NVIDIA if _NVIDIA_GPU=1), then runs setup.sh inside it
       → create-users, install-tools, configure-ssh, install-docker, configure-macvlan-bridge,
         install-nvidia-container-toolkit
+      → configure-docker-image-prune (periodic removal of unreferenced Docker images)
       → deploys HOMELAB_SERVICES (Jellyfin, Immich, Caddy, Scrutiny, monitoring, monitoring-agent, etc.)
     → creates NAS LXC, then runs setup.sh inside it
       → create-users, install-tools, configure-ssh, install-samba, set-share-permissions,
@@ -137,8 +139,8 @@ setup.sh on Proxmox host
 
 Module order matters. `configure-nvidia-driver` must come before `create-lxcs`, for the
 same reason `configure-amdgpu` does: a passthrough step can only pass device nodes that
-already exist. Inside the LXC, `install-nvidia-container-toolkit` must come after
-`install-docker`.
+already exist. Inside the LXC, `install-nvidia-container-toolkit` and
+`configure-docker-image-prune` must both come after `install-docker`.
 
 One command. Everything configured.
 
@@ -845,6 +847,22 @@ HOMELAB_SETUP_MODULES="create-users install-tools install-docker"
 ## Image Management
 
 Docker images are pinned to specific versions with SHA256 digests for reproducibility. [Renovate Bot](https://docs.renovatebot.com/) automatically opens PRs when new versions are available, so updates are reviewed before deployment.
+
+### Reclaiming superseded images
+
+Each digest bump pulls a new image and leaves the old one on disk, so without a sweep the Docker host's rootfs only ever grows. The **`configure-docker-image-prune`** module (Docker LXC) schedules `scripts/docker-image-prune.sh` on `DOCKER_IMAGE_PRUNE_SCHEDULE`; it logs the unreferenced images by name, then removes them with `docker image prune -a`. A container protects its image whether it is running or stopped, so one-shot containers that exit after a deploy keep theirs, and anything removed is re-pullable from the digest pinned in git.
+
+`-a` is required, not a precaution: because images are pinned by digest, Docker holds them by repo digest rather than by tag, so `docker images` shows their tag as `<none>` without them being dangling. A plain `docker image prune` skips every one of them and can report gigabytes reclaimable while freeing nothing. (The per-deploy `docker image prune -f` in `run-service.sh` is a narrower job — it clears the dangling leftovers of the locally-built `webhook` image.)
+
+**Schedule it earlier in the week than `LXC_FSTRIM_SCHEDULE`.** The prune frees files inside the LXC; only the host's `pct fstrim` returns those blocks to the LVM thin pool. The two timers run on different machines, so nothing enforces the order but the calendar — the defaults in `.env.template` prune on Sunday and trim on Monday.
+
+Volumes are never pruned and stopped containers are never reaped. Removing an image is reversible; removing a volume holding service state is not. Review leftover containers by hand with `docker ps -a --filter status=exited`.
+
+Build cache is not pruned either. It is a few dozen megabytes — noise next to the images this reclaims — and clearing it would make the locally-built `webhook` service rebuild from scratch on its next deploy, producing new layer digests that Compose treats as a changed image and recreates the container for.
+
+A deploy landing in the same moment is an accepted race: between `docker compose pull` and `docker compose up` a freshly pulled image is referenced by no container yet, so a sweep in that window can remove it. Compose pulls a missing image again, so that gap heals itself; the narrower window *inside* a single `up` does not — images are resolved up front, so a service still waiting on a `depends_on` health gate fails to create rather than re-pulling. The next deploy puts it right, since the digest is pinned in git.
+
+To see what a run would remove without removing anything: `bash scripts/docker-image-prune.sh --dry-run`.
 
 ### Self-mirrored images (ghcr)
 
