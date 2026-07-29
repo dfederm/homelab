@@ -58,7 +58,7 @@ services:
   # Declaratively ensures the configured models are present. Runs once each deploy after
   # the server is healthy, then exits. `ollama pull` is idempotent (already-present models
   # are skipped) and runs server-side, so this is a thin API client — no volume needed.
-  # A large pull (e.g. qwen3:30b) downloads in the background; follow it with
+  # A large pull (e.g. qwen3:30b-instruct) downloads in the background; follow it with
   # `docker logs -f ollama-pull`.
   ollama-pull:
     container_name: ollama-pull
