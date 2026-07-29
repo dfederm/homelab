@@ -25,13 +25,16 @@ services:
       # Inference needs CUDA (compute) and nvidia-smi (utility); no graphics.
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
       - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE}
-      # Cap resident models + parallelism. Defaults (2 / 1) suit CPU serving: they stop large MoE
-      # weights (~17 GB each) stacking in RAM and thrashing (KEEP_ALIVE=24h otherwise pins every
-      # touched model for a day), while keeping the chat model + a small task/embed model
-      # co-resident (avoids 17 GB reload churn) and preventing both 17 GB models (instruct +
-      # thinking) resident at once. Override per-machine (e.g. raise on a GPU host) via the env file.
-      - OLLAMA_MAX_LOADED_MODELS=${OLLAMA_MAX_LOADED_MODELS:-2}
-      - OLLAMA_NUM_PARALLEL=${OLLAMA_NUM_PARALLEL:-1}
+      # Optional clamps, both normally left blank. Ollama already admits models by available memory
+      # and evicts (LRU) to make room; blank lets it auto-size the resident-model cap to 3 per GPU,
+      # and concurrent requests per model to 1. The model count is a SEPARATE, earlier gate than the
+      # memory check, so setting it too low evicts models that would have fit — a chat + task +
+      # embedding trio well inside VRAM still thrashes at 2.
+      # ⚠️ Worth clamping the model count in one case: on a CPU-only host in a container, Ollama
+      # sizes system RAM from the hypervisor rather than the container's limit, so its memory gate
+      # over-admits. VRAM on a GPU host is read accurately and needs no clamp.
+      - OLLAMA_MAX_LOADED_MODELS=${OLLAMA_MAX_LOADED_MODELS}
+      - OLLAMA_NUM_PARALLEL=${OLLAMA_NUM_PARALLEL}
       # Server-side default context window. This is load-bearing, not a tuning knob: Open WebUI
       # talks to the OpenAI-compatible /v1 endpoint (see the open-webui service below), and the
       # OpenAI protocol has no per-request context field — a model's num_ctx set in the Open WebUI
@@ -89,12 +92,13 @@ services:
   # publicly via Caddy (site block in services/reverse-proxy/Caddyfile).
   # Its SQLite DB + ChromaDB (per-user chats, settings, RAG vectors) persist on ZFS-backed
   # appdata so they survive container recreation.
-  # NOTE: many of these env vars (OLLAMA_BASE_URL, WEBUI_URL, TASK_MODEL, ENABLE_OPENAI_API,
-  # OPENAI_API_BASE_URL, OPENAI_API_KEY, ENABLE_SIGNUP, DEFAULT_USER_ROLE, RAG_EMBEDDING_*) are
-  # "PersistentConfig" — read on first launch then stored in the DB. After the first deploy they
-  # are managed in the UI/DB, so changing them here later has no effect unless the data volume is
-  # wiped. They seed sane first-run defaults; on an existing instance the same change must ALSO be
-  # made in Admin Settings -> Connections.
+  # NOTE: many of these env vars (OLLAMA_BASE_URL, WEBUI_URL, ENABLE_OPENAI_API,
+  # OPENAI_API_BASE_URL, OPENAI_API_KEY, ENABLE_SIGNUP, DEFAULT_USER_ROLE, TASK_MODEL*,
+  # RAG_EMBEDDING_*) are "PersistentConfig" — read on first launch then stored in the DB. After the
+  # first deploy they are managed in the UI/DB, so changing them here later has no effect unless the
+  # data volume is wiped. They seed sane first-run defaults; on an existing instance the same change
+  # must ALSO be made in Admin Settings, under the panel that owns the setting (Connections for the
+  # connection vars, Interface for TASK_MODEL*, Documents for RAG_EMBEDDING_*).
   open-webui:
     container_name: open-webui
     image: ghcr.io/open-webui/open-webui:v0.10.2@sha256:9fcea9c6e32ab60b0498f3986c6cdf651ddbe61db48d2213a3d28048ddd673d4
@@ -123,6 +127,9 @@ services:
       # The native Ollama connection stays enabled: RAG_EMBEDDING_ENGINE=ollama below uses it for
       # embeddings (a separate code path, unaffected by the tool-call bug), and it keeps the model
       # list/pull management in the UI working. Chat is what moves to the OpenAI connection.
+      # It also keeps the task model reachable under an unprefixed id (see TASK_MODEL below):
+      # disabling this connection, or giving it a prefix, can silently change which model Open WebUI
+      # picks for background tasks.
       # Family instance: no public self-registration — the admin provisions each account
       # (Admin Settings -> Users -> Add User). NOTE: the very first account to register still
       # becomes the admin (initial-admin signup intentionally bypasses this flag), so create
@@ -131,9 +138,21 @@ services:
       # Defense in depth: any account that does get created lands in 'pending' and cannot use
       # the app (no model access) until an admin approves it.
       - DEFAULT_USER_ROLE=pending
-      # Use the small/fast model for background tasks (title/tag/query generation) so the
-      # large chat model isn't burned on trivia. Seeds the first-run default; change in the UI.
+      # Use the small/fast model for background tasks (title/tag/query generation) so the large chat
+      # model isn't burned on trivia.
+      # BOTH vars are needed: Open WebUI picks the task model by the chat model's connection type —
+      # TASK_MODEL for the native Ollama connection, TASK_MODEL_EXTERNAL for the OpenAI-compatible
+      # one — and which applies depends on how the connections are configured in the UI. If neither
+      # matches, background tasks fall back to the chat model itself, which is expensive well beyond
+      # the wasted tokens: Ollama serves one KV cache slot per model (OLLAMA_NUM_PARALLEL), so a
+      # background task on the chat model evicts the conversation's cached prompt prefix and the
+      # user's next turn re-prefills the whole context — minutes on CPU inference.
+      # ⚠️ The model must also be in OLLAMA_PULL_MODELS and readable by non-admin users (Admin
+      # Settings -> Models): background tasks run under the requesting user and are access-checked,
+      # but admins bypass that check, so a task model only an admin can read fails for everyone else
+      # silently, with no error in the UI.
       - TASK_MODEL=${OPEN_WEBUI_TASK_MODEL}
+      - TASK_MODEL_EXTERNAL=${OPEN_WEBUI_TASK_MODEL}
       # Use the local Ollama embeddings model for RAG instead of Open WebUI's bundled
       # default, so the pulled embeddings model (OPEN_WEBUI_RAG_EMBEDDING_MODEL) is actually used.
       - RAG_EMBEDDING_ENGINE=ollama

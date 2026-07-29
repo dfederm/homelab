@@ -479,7 +479,16 @@ First-run setup notes:
   window comes from Ollama's `OLLAMA_CONTEXT_LENGTH` instead.
 - `OPEN_WEBUI_TASK_MODEL` seeds a small/fast task model (e.g. `qwen2.5:7b`) for
   title/tag/query generation so the large chat model isn't burned on trivia; it can be
-  changed later in the UI (it is a first-launch-seeded "PersistentConfig" value).
+  changed later in the UI (it is a first-launch-seeded "PersistentConfig" value, set in
+  Admin Settings → Interface). It feeds **both** `TASK_MODEL` and `TASK_MODEL_EXTERNAL`,
+  because Open WebUI chooses between them by the chat model's connection type — set both and
+  the applicable one wins. If neither matches, background tasks run on the large chat model.
+  That is worth avoiding for more than the wasted tokens: Ollama keeps one KV cache slot per
+  model, so a background task on the chat model evicts the conversation's cached prompt prefix
+  and the next user turn re-prefills the whole context, which costs minutes on CPU inference.
+  The task model must also be readable by non-admin users (Admin Settings → Models): background
+  tasks run under the requesting user and are access-checked, and admins bypass that check, so a
+  task model only an admin can read fails for everyone else with no visible error.
 - `OPEN_WEBUI_RAG_EMBEDDING_MODEL` (e.g. `nomic-embed-text`) is used via the local Ollama
   for RAG embeddings instead of Open WebUI's bundled embedder.
 
