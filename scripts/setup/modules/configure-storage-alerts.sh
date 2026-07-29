@@ -30,57 +30,9 @@ if [ ! -f "$CHECK_SCRIPT" ]; then
 fi
 
 # Install the shoutrrr CLI - the sender the storage check uses to deliver alerts
-# through the shared Shoutrrr URL. nicholas-fedor/shoutrrr is the same fork Beszel
-# embeds, so it parses HOMELAB_ALERT_SHOUTRRR_URL identically. The version below is
-# kept current by Renovate (custom manager in renovate.json, github-releases
-# datasource - it opens a PR to bump it like any Docker image), and the binary is
-# verified against GitHub's published per-asset sha256 digest. Best-effort: a
-# failure here does NOT fail the deploy - the check falls back to syslog meanwhile.
-# renovate: datasource=github-releases depName=nicholas-fedor/shoutrrr
-SHOUTRRR_VERSION="0.16.2"
-ensure_shoutrrr() {
-    local bin="/usr/local/bin/shoutrrr"
-    local marker="/usr/local/bin/.shoutrrr-version"
-    if [ -x "$bin" ] && [ "$(cat "$marker" 2>/dev/null)" = "$SHOUTRRR_VERSION" ]; then
-        echo "shoutrrr $SHOUTRRR_VERSION already installed"
-        return 0
-    fi
-    if ! command -v jq &>/dev/null || ! command -v curl &>/dev/null || ! command -v tar &>/dev/null; then
-        apt_get update -qq >/dev/null
-        apt_get install -y -qq jq curl tar >/dev/null
-    fi
-    local repo="nicholas-fedor/shoutrrr"
-    local tag="v${SHOUTRRR_VERSION}"
-    local asset="shoutrrr_linux_amd64_${SHOUTRRR_VERSION}.tar.gz"
-    local digest
-    digest="$(curl -fsSL -H 'Accept: application/vnd.github+json' \
-        "https://api.github.com/repos/${repo}/releases/tags/${tag}" \
-        | jq -r --arg n "$asset" '.assets[] | select(.name == $n) | .digest' \
-        | sed 's/^sha256://')"
-    if ! printf '%s' "$digest" | grep -qE '^[0-9a-f]{64}$'; then
-        echo "  WARNING: could not get a sha256 digest for $asset @ ${tag} from GitHub" >&2
-        return 1
-    fi
-    local tmp
-    tmp="$(mktemp -d)"
-    if ! curl -fsSL --retry 3 --retry-delay 2 \
-        "https://github.com/${repo}/releases/download/${tag}/${asset}" -o "$tmp/$asset"; then
-        rm -rf "$tmp"; echo "  WARNING: shoutrrr download failed" >&2; return 1
-    fi
-    if [ "$(sha256sum "$tmp/$asset" | cut -d' ' -f1)" != "$digest" ]; then
-        rm -rf "$tmp"; echo "  WARNING: shoutrrr checksum mismatch" >&2; return 1
-    fi
-    if ! tar -xzf "$tmp/$asset" -C "$tmp" shoutrrr; then
-        rm -rf "$tmp"; echo "  WARNING: shoutrrr extract failed" >&2; return 1
-    fi
-    if ! install -m 755 "$tmp/shoutrrr" "$bin"; then
-        rm -rf "$tmp"; echo "  WARNING: shoutrrr install failed" >&2; return 1
-    fi
-    echo "$SHOUTRRR_VERSION" > "$marker"
-    rm -rf "$tmp"
-    echo "Installed shoutrrr $SHOUTRRR_VERSION (verified against GitHub digest)"
-}
-
+# through the shared Shoutrrr URL (see ensure_shoutrrr in scripts/lib.sh, which the
+# new-service-state backup runner shares). Best-effort: a failure here does NOT fail
+# the deploy - the check falls back to syslog meanwhile.
 if ! ensure_shoutrrr; then
     echo "  WARNING: shoutrrr CLI unavailable; storage-space alerts log to syslog only until it installs."
 fi

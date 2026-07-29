@@ -68,9 +68,9 @@
   "customManagers": [
     {
       "customType": "regex",
-      "description": "Keep the pinned shoutrrr CLI version (configure-storage-alerts module) updated via PRs, like the Docker images",
+      "description": "Keep the pinned shoutrrr CLI version (ensure_shoutrrr in scripts/lib.sh) updated via PRs, like the Docker images",
       "managerFilePatterns": [
-        "/scripts/setup/modules/configure-storage-alerts\\.sh$/"
+        "/scripts/lib\\.sh$/"
       ],
       "matchStrings": [
         "#\\s*renovate:\\s*datasource=(?<datasource>\\S+)\\s+depName=(?<depName>\\S+)\\s+SHOUTRRR_VERSION=\"(?<currentValue>[^\"]+)\""

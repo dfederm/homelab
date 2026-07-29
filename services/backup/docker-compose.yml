@@ -13,11 +13,26 @@ services:
       - BACKUP_DEST=${BACKUP_DEST}
       # Optional cron schedule; start.sh defaults to "0 3 * * *" when unset.
       - BACKUP_CRON=${BACKUP_CRON:-}
+      # Optional remote path that files replaced/deleted by the mirroring sync are
+      # moved to instead of being destroyed (rclone --backup-dir).
+      - BACKUP_ARCHIVE_DEST=${BACKUP_ARCHIVE_DEST:-}
+      # Optional space-separated rclone filter patterns to skip.
+      - BACKUP_EXCLUDE=${BACKUP_EXCLUDE:-}
+      # Optional "true" to refuse the sync unless BACKUP_DEST is a crypt remote.
+      - BACKUP_REQUIRE_ENCRYPTION=${BACKUP_REQUIRE_ENCRYPTION:-}
+      # Optional URL pinged after a successful sync (a dead-man's-switch monitor, hosted
+      # OFF this lab), so a backup that fails — or silently stops running — is noticed.
+      - BACKUP_HEARTBEAT_URL=${BACKUP_HEARTBEAT_URL:-}
+      # Optional "true" to allow syncing an empty source (normally a mount error).
+      - BACKUP_ALLOW_EMPTY_SOURCE=${BACKUP_ALLOW_EMPTY_SOURCE:-}
     volumes:
       # Shared rclone config (all remotes). Read-write so OneDrive OAuth token
       # refreshes persist; each target only reads its own remote.
       - ${DOCKER_APPDATA_ROOT}/backup/rclone:/config/rclone:rw
-      # Only this target's source directory, read-only.
+      # Only this target's source directory, read-only. A target that backs up
+      # something outside the user-share root (service state, an Immich library)
+      # overrides BACKUP_DATA_ROOT in its own env file — run-service.sh layers that
+      # file last, so a per-target value wins over the machine-wide one.
       - ${BACKUP_DATA_ROOT}/${BACKUP_SOURCE_DIR}:/data:ro
       - ./start.sh:/start.sh:ro
       - ./backup.sh:/backup.sh:ro

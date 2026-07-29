@@ -35,7 +35,8 @@ fi
 # Multi-instance services: when <SERVICE>_INSTANCES is set (space-separated), deploy the
 # same compose once per instance as its own project (e.g. minecraft-creative), layering a
 # per-instance env file (<config_dir>/<service>/<instance>.env) on top of common + machine
-# env. Adding an instance then needs only that env file plus a name in the list.
+# env. Adding an instance then needs only that env file plus a name in the list. A key set
+# in the instance file wins over the same key in common/machine env (see the unset below).
 SERVICE_UPPER=$(echo "$SERVICE" | tr 'a-z-' 'A-Z_')
 INSTANCES_VAR="${SERVICE_UPPER}_INSTANCES"
 INSTANCES="${!INSTANCES_VAR:-}"
@@ -56,9 +57,28 @@ if [ -n "$INSTANCES" ]; then
         [ -f "$COMMON_ENV" ] && ENV_ARGS+=(--env-file "$COMMON_ENV")
         ENV_ARGS+=(--env-file "$ENV_FILE")
         [ -f "$INSTANCE_ENV" ] && ENV_ARGS+=(--env-file "$INSTANCE_ENV")
+        # Exported outside the subshell so the post-up hook below still sees it, as
+        # before; the subshell inherits it for compose.
         export "${SERVICE_UPPER}_INSTANCE=$INSTANCE"
-        docker compose -p "$SERVICE-$INSTANCE" "${ENV_ARGS[@]}" pull
-        docker compose -p "$SERVICE-$INSTANCE" "${ENV_ARGS[@]}" up $FORCE --remove-orphans -d
+        # Subshell so the unset below is scoped to this instance and the next one
+        # still sees the machine-wide values.
+        (
+            # Compose resolves interpolation from the shell environment BEFORE any
+            # --env-file, and setup.sh exports every machine-env var (`set -a`). So on
+            # the push-to-deploy path a per-instance value would be silently ignored
+            # for any name that also exists in the machine env — the opposite of what
+            # layering the instance file last is supposed to mean, and it fails
+            # quietly rather than erroring. Dropping exactly the names the instance
+            # file defines lets --env-file resolution win, so a per-instance override
+            # behaves the same whether setup.sh or a hand-run deployed it.
+            if [ -f "$INSTANCE_ENV" ]; then
+                while read -r key; do
+                    [ -n "$key" ] && unset "$key" || true
+                done < <(sed -nE 's/^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*)=.*/\1/p' "$INSTANCE_ENV")
+            fi
+            docker compose -p "$SERVICE-$INSTANCE" "${ENV_ARGS[@]}" pull
+            docker compose -p "$SERVICE-$INSTANCE" "${ENV_ARGS[@]}" up $FORCE --remove-orphans -d
+        )
         # Optional per-instance post-deploy hook (e.g. apply gamerules via the console).
         # CONFIG_DIR is exported by source_env, so the hook can find per-instance files.
         if [ -f "$SERVICEPATH/post-up.sh" ]; then

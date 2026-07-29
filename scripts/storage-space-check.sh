@@ -60,31 +60,19 @@ notify() {
         fi
     fi
 
-    local full="$title - $body"
-    logger -t homelab-storage-alert "$full" 2>/dev/null || true
-    echo "ALERT: $full"
-
     # --- Alert delivery via the shared Shoutrrr channel (backend: Pushover) ---
-    # HOMELAB_ALERT_SHOUTRRR_URL (common.env) is the ONE channel shared with the
-    # Beszel hub and scrutiny. Backend is Pushover:
-    #   pushover://shoutrrr:<APP_TOKEN>@<USER_KEY>/
-    # The shoutrrr CLI (installed by the configure-storage-alerts module) sends it.
-    # If the URL is unset (not yet configured) the alert is logged to syslog only -
-    # a safe no-op - so the check is harmless before Pushover credentials are set.
-    if [ -n "${HOMELAB_ALERT_SHOUTRRR_URL:-}" ]; then
-        if command -v shoutrrr &>/dev/null; then
-            if shoutrrr send --url "$HOMELAB_ALERT_SHOUTRRR_URL" \
-                --title "homelab storage" --message "$full"; then
-                echo "$now" > "$stamp"
-            else
-                echo "  WARNING: shoutrrr send failed; will retry next run" >&2
-            fi
-            return 0
-        fi
-        echo "  WARNING: HOMELAB_ALERT_SHOUTRRR_URL set but 'shoutrrr' CLI missing; logged only" >&2
+    # send_alert (scripts/lib.sh) logs to syslog and, when
+    # HOMELAB_ALERT_SHOUTRRR_URL is set and the shoutrrr CLI is installed (by the
+    # configure-storage-alerts module), pushes to the one channel shared with the
+    # Beszel hub and scrutiny. A send failure leaves the cooldown stamp untouched so
+    # the next run retries; every other outcome stamps it, so syslog isn't spammed
+    # every run either. Title and body are passed separately so the logged line reads
+    # once, not with its own title repeated inside the message.
+    if send_alert "homelab storage" "$title - $body" "homelab-storage-alert"; then
+        echo "$now" > "$stamp"
+    else
+        echo "  WARNING: alert send failed; will retry next run" >&2
     fi
-    # Stub path: record the alert time so syslog isn't spammed every run either.
-    echo "$now" > "$stamp"
 }
 
 echo "=== Storage space check: $(hostname) $(date '+%Y-%m-%d %H:%M:%S') ==="

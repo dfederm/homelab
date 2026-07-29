@@ -21,7 +21,7 @@ All data lives on a ZFS pool and is bind-mounted into containers. The LXC root f
 │   └── smb.conf.global    # Samba [global] config (shares are generated)
 ├── renovate.json          # Automated Docker image update config
 ├── scripts/
-│   ├── backup/            # Database and volume backup scripts
+│   ├── backup-service-state.sh # Stage consistent copies of service state (DB dumps, Forgejo, config)
 │   ├── bootstrap-remote.sh # Bootstrap a new non-LXC machine (SMB mount + first setup)
 │   ├── deploy.sh          # Deploy changes on this machine (pull + setup)
 │   ├── dispatch.sh        # Webhook handler: pulls code, fans out setup to all machines
@@ -29,7 +29,7 @@ All data lives on a ZFS pool and is bind-mounted into containers. The LXC root f
 │   ├── recreate-service.sh # Force-recreate a service container
 │   ├── run-all-services.sh
 │   ├── run-service.sh     # Deploy a single Docker Compose service
-│   ├── storage/           # Host-level storage-health scripts (ZFS scrub/health, SMART alert dispatch)
+│   ├── storage/           # Host-level storage scripts (ZFS scrub/health/snapshots, SMART alert dispatch)
 │   ├── storage-space-check.sh # Threshold alerts for thin-pool + ZFS pool capacity
 │   ├── update.sh          # Update system packages on host and all LXCs
 │   └── setup/
@@ -95,11 +95,13 @@ Modules are standalone, idempotent scripts in `scripts/setup/modules/`. Each han
 | `configure-network` | Pin a machine to a static IPv4 address (`STATIC_IP`) via NetworkManager | Remote machines |
 | `configure-proxmox-repos` | Switch from paid enterprise repos to free community repos | Proxmox host |
 | `configure-sensors` | Install lm-sensors and persist the hwmon kernel modules for the board's Super I/O chip (`SENSORS_KERNEL_MODULES`), so fan speeds and board temperatures are readable | Bare-metal hosts |
+| `configure-service-backups` | Schedule staging of application-consistent service-state copies (`SERVICE_BACKUP_SCHEDULE`/`_JOBS`) — DB dumps, `forgejo dump`, config dirs — for a backup target to ship offsite | Docker LXC |
 | `configure-smb-mount` | Mount NAS share via CIFS, persist in fstab | Remote machines |
 | `configure-lxc-fstrim` | Scheduled `pct fstrim` of LXC rootfs volumes (`LXC_FSTRIM_SCHEDULE`) so blocks freed inside containers return to the LVM thin pool | Proxmox host |
 | `configure-ssh` | Harden SSH (key-only auth) and deploy authorized keys | All machines |
 | `configure-storage-alerts` | Periodic threshold alerts for LVM thin-pool + ZFS pool capacity (the storage Beszel can't see) | Proxmox host |
 | `configure-storage-health` | Schedule monthly ZFS scrubs + daily pool health check + SMART self-tests (smartd), with degradation alerting | Proxmox host |
+| `configure-zfs-snapshots` | Schedule recursive ZFS snapshots with per-period retention (`ZFS_SNAPSHOT_*`) — the fast local undo for accidental deletes | Proxmox host |
 | `create-lxcs` | Create/update LXC containers from env var definitions (supports GPU passthrough via `_GPU=1`) | Proxmox host |
 | `create-vms` | Create/update VMs (e.g. Home Assistant) | Proxmox host |
 | `create-users` | Create Linux users/groups with aligned UIDs across machines | Docker LXC, NAS LXC |
@@ -119,11 +121,13 @@ setup.sh on Proxmox host
   → configure-proxmox-repos, install-tools, configure-amdgpu, configure-sensors,
     configure-kernel-cmdline, configure-ssh, install-beszel-agent, configure-storage-alerts
   → configure-storage-health (ZFS scrub + SMART self-tests + alerting), configure-scrutiny-collector
+  → configure-zfs-snapshots (scheduled recursive snapshots + retention)
   → configure-lxc-fstrim (periodic thin-pool reclaim for LXC rootfs)
   → provision-host-volumes (dedicated fast-NVMe volumes, e.g. the Ollama model store)
   → create-lxcs
     → creates Docker LXC (GPU passthrough if _GPU=1), then runs setup.sh inside it
       → create-users, install-tools, configure-ssh, install-docker, configure-macvlan-bridge
+      → configure-service-backups (stage consistent service-state copies for the cloud sync)
       → deploys HOMELAB_SERVICES (Jellyfin, Immich, Caddy, Scrutiny, monitoring, monitoring-agent, etc.)
     → creates NAS LXC, then runs setup.sh inside it
       → create-users, install-tools, configure-ssh, install-samba, set-share-permissions,
@@ -320,6 +324,43 @@ var (`ZFS_SCRUB_SCHEDULE`, `ZFS_HEALTH_CHECK_SCHEDULE`, `SMART_SELFTEST_SCHEDULE
 `SCRUTINY_COLLECTOR_SCHEDULE`). `.env.template` ships recommended defaults; **clear a value
 (set it empty) to disable that specific feature** — the module then removes the
 corresponding timer. (smartd still runs for monitoring even with self-tests disabled.)
+
+### ZFS Snapshots
+
+**`configure-zfs-snapshots`** (Proxmox host) takes recursive snapshots of
+`ZFS_SNAPSHOT_DATASETS` on hourly / daily / monthly timers, each with its own retention
+count. Same schedule semantics as above: clear a period's schedule to disable it.
+
+Snapshots and the cloud backup solve *different* problems, which is why both exist:
+
+| | Snapshots | Cloud backup |
+|---|---|---|
+| Recovers from | accidental delete, bad edit, bad upgrade | pool loss, fire, theft, ransomware |
+| Recovery time | seconds (a file copy) | hours to days (download) |
+| Survives pool loss | **no** | yes |
+
+A snapshot is not a backup — it lives on the pool it protects. It *is* by far the fastest
+answer to the most common failure, so it complements rather than replaces the offsite copy.
+
+Restoring is a plain file copy out of the hidden per-dataset snapshot directory — no
+`zfs rollback`, no downtime, and it can't clobber newer files:
+
+```bash
+ls /<mountpoint>/.zfs/snapshot/                                  # what's available
+cp -a /<mountpoint>/.zfs/snapshot/homelab-hourly-<ts>/path/to/file /<mountpoint>/path/to/
+```
+
+Snapshots are named `homelab-<period>-<UTC timestamp>`, and pruning only ever considers
+that prefix — **a snapshot you took by hand is never destroyed by the timer**. Take one
+before risky work and it survives until you remove it:
+
+```bash
+zfs snapshot -r <pool>/<dataset>@manual-before-<whatever>
+```
+
+Retention defaults (48 hourly / 30 daily / 12 monthly) are set by snapshot **count**, not
+capacity: a large pool has ample room, but every snapshot lengthens `zfs list -t snapshot`
+and scrub bookkeeping. Timestamps are UTC so names stay unique and sortable across DST.
 
 ## Rebuild & Restore
 
@@ -790,9 +831,146 @@ Shared folders with no single owner (e.g. `family`, `adults`)
 back up into an existing personal remote under a **separate** top-level path so they don't collide
 with that person's own backup — e.g. a `family` target → `onedrivedavid:/nas-backup-shared/family`
 while david's own backup stays at `onedrivedavid:/nas-backup`. This is enforced, not just advisory:
-`run-service.sh` runs `services/backup/pre-up.sh` before deploying and **aborts** if any two
-targets' destinations overlap on the same remote (an equal or ancestor path would let one target's
-pruning sync delete another's backup).
+`run-service.sh` runs `services/backup/pre-up.sh` before deploying and **aborts**
+if any two targets' destinations overlap on the same remote (an equal or ancestor path would let
+one target's pruning sync delete another's backup). `BACKUP_ARCHIVE_DEST` paths are checked the
+same way.
+
+#### Surviving the sync itself
+
+`rclone sync` mirrors, so by default the backup faithfully reproduces whatever just happened to
+the source — including a corruption, a ransomware run, or a deletion. Three per-target options
+exist to stop the backup being destroyed by the event it exists for:
+
+- **`BACKUP_ARCHIVE_DEST`** (rclone `--backup-dir`) — files the sync is about to overwrite or
+  delete are moved aside on the remote instead of destroyed. The move is server-side, so this
+  costs no extra upload. Note the archive is itself a mirror path, so it holds **the most recent
+  superseded copy of each file, not a full version history**: a file replaced on two consecutive
+  nights leaves only the night-2 copy in the archive. That is bounded in size and enough to
+  survive "last night's sync propagated the damage"; if you want more generations, point
+  `BACKUP_ARCHIVE_DEST` at a dated path and prune it yourself. It must be on the same remote as
+  `BACKUP_DEST` (rclone's requirement) and disjoint from every target's destination — `pre-up.sh`
+  checks both.
+- **`BACKUP_HEARTBEAT_URL`** — pinged only after a *successful* sync, so a monitor that expects it
+  on a schedule catches both a failing sync and the failure container logs can't show: a backup
+  that silently stopped running. ⚠️ Point this at a monitor that does **not** run on this lab —
+  a dead-man's switch hosted on the machine it watches goes quiet for the same reasons the backup
+  did, and reports nothing. (Same reasoning as the infra alarm channel, which is deliberately
+  off-box.)
+- **`BACKUP_REQUIRE_ENCRYPTION=true`** — the sync refuses to run unless `BACKUP_DEST` resolves to
+  an rclone `crypt` remote. Set it on any target whose source holds secrets. With a crypt remote
+  the **password is the backup**: store it somewhere that survives losing the lab.
+
+A sync also refuses to run when its source directory is empty, since that almost always means the
+bind mount resolved to the wrong path — and mirroring an empty directory would delete the entire
+destination. `BACKUP_ALLOW_EMPTY_SOURCE=true` opts out.
+
+### Service-state backup
+
+The targets above copy *files*. They cannot ask a service for a consistent copy of itself: the
+container is a bare `rclone` image with no `pg_dump` and no `forgejo` CLI, and copying a live
+database's files out from under it produces a backup that looks fine and fails on restore. The
+**`configure-service-backups`** module fills that gap — `scripts/backup-service-state.sh` runs on
+a timer, stages consistent copies into `SERVICE_BACKUP_ROOT`, and stops there. An ordinary backup
+target pointed at `SERVICE_BACKUP_ROOT` then ships it offsite. Dump here, ship there.
+
+Each job in `SERVICE_BACKUP_JOBS` declares a type:
+
+| Type | Used for | How it stays consistent |
+|---|---|---|
+| `forgejo` | Forgejo (git repos, LFS, the OCI registry, and its SQLite database) | `forgejo dump` streamed straight into the staging tree |
+| `postgres` | Vikunja | `pg_dump --clean --if-exists` inside the database's own container |
+| `sqlite` | Authelia, Uptime Kuma, Koffan | `sqlite3 -readonly ... .backup`, which takes a read lock and can't modify the live database |
+| `path` | zwave-js-ui, Radicale, AdGuard config, the homelab config dir | plain mirror — these are files, not a database |
+
+Output paths are stable rather than dated, so the follow-on sync only uploads what changed;
+retaining the copy a sync would otherwise destroy is `BACKUP_ARCHIVE_DEST`'s job. Jobs that
+produce a dump file write a `.part`
+and rename it into place only on success, so an interrupted run can't replace a good backup
+with a truncated one; a `path` job instead mirrors in place, and is protected by refusing a
+missing or empty source. Jobs are independent — one failure doesn't stop the others, and the
+run then exits non-zero and alerts on the shared channel (`HOMELAB_ALERT_SHOUTRRR_URL`), including
+when it is killed by a timeout or shutdown. A `backup-manifest.txt` ships alongside the data
+recording what each run produced and when.
+
+**One schedule for all jobs, deliberately.** Every job here is seconds-to-minutes and produces
+tens of MB (Forgejo, which carries the git repos and the OCI registry, is the only one that can
+grow); the real constraint is ordering — the staging run must finish before the sync that ships
+it starts. Per-job schedules would add configuration surface without buying anything, so
+frequency is set once by `SERVICE_BACKUP_SCHEDULE`. Split it only if a job grows expensive
+enough that its runtime threatens that ordering.
+
+#### What is and isn't covered, and why
+
+Every stateful service is an explicit decision. "Regenerable" means losing it costs rebuild time,
+not data.
+
+| Service | State | Decision |
+|---|---|---|
+| Forgejo | git repos, LFS, OCI registry, SQLite db | **`forgejo` job** — hosts source that exists nowhere else |
+| Forgejo runner | registration secret | **`path` job** — small, and losing it is the same class as the zwave-key loss |
+| Immich | originals + Postgres | **ship its own output** — Immich writes daily db dumps to `<upload location>/backups`; originals may already be covered (see below) |
+| Home Assistant | HA config/history | **ship its own output** — HAOS auto-backup already writes to the NAS share |
+| Vikunja | Postgres (family tasks) | **`postgres` job** |
+| Radicale | calendars + contacts | **`path` job** — plain files, and the family's primary calendar |
+| zwave-js-ui | settings + S0/S2 network keys | **`path` job** — the loss that motivated all of this |
+| Minecraft | family Bedrock worlds | **`path` job** — see the caveat below |
+| Koffan | SQLite (shopping list) | **`sqlite` job** |
+| Authelia | SQLite (users, TOTP secrets) | **`sqlite` job** — re-enrolling every family member's 2FA is painful |
+| Uptime Kuma | SQLite (monitor config) | **`sqlite` job** — config, not history |
+| Open WebUI | SQLite (accounts, chat history) | **`sqlite` job** if you value the history; otherwise skip |
+| AdGuard Home | config + custom rules | **`path` job on `conf/` only** — `work/` is query logs and stats, regenerable and orders of magnitude larger |
+| Caddy | issued certificates | **skip** — re-issued automatically on demand |
+| Beszel / Scrutiny | metrics + SMART history | **skip** — regenerable telemetry; losing it loses graphs, not data |
+| Ollama models | downloaded model blobs | **skip** — tens of GB and re-pullable via `OLLAMA_PULL_MODELS` |
+| Immich `thumbs`/`encoded-video` | derived media | **skip** — regenerated from the originals, and by far the biggest thing under appdata |
+| SearXNG / Dozzle | caches | **skip** — regenerable |
+| Jellyfin | config + watch history | **`path` job on `config/`** if watch state matters — note it also holds cached artwork/metadata, so it is GBs, not MBs. Media itself is not backed up |
+| Media library | movies/TV/music | **skip** — re-acquirable, and far too large to send offsite |
+
+⚠️ **Minecraft caveat.** Bedrock worlds are LevelDB, which a copy taken mid-write can catch
+inconsistently. A `path` job plus ZFS snapshots is a large improvement over no backup at all, but
+for a guaranteed-clean world copy, stop the server (or issue `save hold` / `save resume` on its
+console) around the copy.
+
+Two services need no job here because they already produce their own backups on ZFS; they only
+need a target pointed at them:
+
+- **Home Assistant** writes its native backups to the `backup/` directory of the `homelab` share
+  (see [Rebuild & Restore](#home-assistant-haos-vm)). Those survive a host rebuild but not pool
+  loss, so back that directory up like any other target. Point the target at HA's own
+  subdirectory rather than the whole `backup/` tree — that tree can also hold unrelated
+  one-off drops (old migration archives) that you don't want re-uploading nightly.
+- **Immich** writes daily database dumps into `<upload location>/backups` and keeps the last 14
+  (**Administration → Settings → Backup** — a UI setting, so confirm it is actually on; nothing in
+  this repo can assert it). **Where the originals live decides the whole Immich backup shape:**
+  - *External library* (`IMMICH_PICTURES_LOCATION`) — originals live outside the upload location.
+    If that path is inside a user share this repo already backs up, the originals are covered by
+    that target and Immich needs **only its database dumps** backed up here. If it is anywhere
+    else, it needs its own target.
+  - *Immich-managed uploads* (`IMMICH_UPLOAD_LOCATION`) — originals are under `upload/`,
+    `library/` and `profile/`, so a target on the upload location covers database and originals
+    together. Set `BACKUP_EXCLUDE=thumbs/** encoded-video/**` — Immich regenerates both.
+
+  Check which applies before relying on either: the two look identical from the outside, and only
+  one of them backs up the photos. Note the upload location normally sits under
+  `DOCKER_APPDATA_ROOT`, and `thumbs/` + `encoded-video/` there can dwarf everything else — back
+  up `backups/` (and `profile/`), not the whole tree.
+
+#### Restoring
+
+| What | How |
+|---|---|
+| Forgejo | `forgejo restore --file forgejo-dump.tar.gz` into a fresh instance (see the Forgejo admin docs; the dump carries db + repos + packages) |
+| Postgres job | `gunzip -c <db>.sql.gz \| docker exec -i <container> psql --username=<user> --dbname=<db>` |
+| SQLite job | stop the service, copy the `.db` file back over the live one, start it |
+| `path` job | copy the tree back into place, then redeploy the service |
+| Immich | restore the `.sql.gz` from **Administration → Maintenance → Restore database backup**, after putting the media folders back |
+| Home Assistant | restore the backup from the HA onboarding screen or **Settings → System → Backups** |
+
+**A backup nobody has restored from is a hypothesis.** Restore-test at least Forgejo and one
+database into a throwaway target periodically — a dump that has never been read back is
+indistinguishable from a broken one.
 
 ## Env Files
 

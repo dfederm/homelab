@@ -197,6 +197,91 @@ merge_cmdline_params() {
     echo "${tokens[*]}"
 }
 
+# Install the shoutrrr CLI — the sender every homelab alert goes through.
+#
+# nicholas-fedor/shoutrrr is the same fork Beszel embeds, so it parses
+# HOMELAB_ALERT_SHOUTRRR_URL identically to the hub and to scrutiny. The version
+# below is kept current by Renovate (custom manager in renovate.json,
+# github-releases datasource — it opens a PR to bump it like any Docker image),
+# and the binary is verified against GitHub's published per-asset sha256 digest.
+#
+# Best-effort by contract: returns non-zero instead of exiting, so a callers's
+# deploy is never failed by a transient GitHub outage. Callers fall back to
+# logging (see send_alert).
+#
+# renovate: datasource=github-releases depName=nicholas-fedor/shoutrrr
+SHOUTRRR_VERSION="0.16.2"
+ensure_shoutrrr() {
+    local bin="/usr/local/bin/shoutrrr"
+    local marker="/usr/local/bin/.shoutrrr-version"
+    if [ -x "$bin" ] && [ "$(cat "$marker" 2>/dev/null)" = "$SHOUTRRR_VERSION" ]; then
+        echo "shoutrrr $SHOUTRRR_VERSION already installed"
+        return 0
+    fi
+    if ! command -v jq &>/dev/null || ! command -v curl &>/dev/null || ! command -v tar &>/dev/null; then
+        apt_get update -qq >/dev/null
+        apt_get install -y -qq jq curl tar >/dev/null
+    fi
+    local repo="nicholas-fedor/shoutrrr"
+    local tag="v${SHOUTRRR_VERSION}"
+    local asset="shoutrrr_linux_amd64_${SHOUTRRR_VERSION}.tar.gz"
+    local digest
+    digest="$(curl -fsSL -H 'Accept: application/vnd.github+json' \
+        "https://api.github.com/repos/${repo}/releases/tags/${tag}" \
+        | jq -r --arg n "$asset" '.assets[] | select(.name == $n) | .digest' \
+        | sed 's/^sha256://')" || true
+    if ! printf '%s' "$digest" | grep -qE '^[0-9a-f]{64}$'; then
+        echo "  WARNING: could not get a sha256 digest for $asset @ ${tag} from GitHub" >&2
+        return 1
+    fi
+    local tmp
+    tmp="$(mktemp -d)"
+    if ! curl -fsSL --retry 3 --retry-delay 2 \
+        "https://github.com/${repo}/releases/download/${tag}/${asset}" -o "$tmp/$asset"; then
+        rm -rf "$tmp"; echo "  WARNING: shoutrrr download failed" >&2; return 1
+    fi
+    if [ "$(sha256sum "$tmp/$asset" | cut -d' ' -f1)" != "$digest" ]; then
+        rm -rf "$tmp"; echo "  WARNING: shoutrrr checksum mismatch" >&2; return 1
+    fi
+    if ! tar -xzf "$tmp/$asset" -C "$tmp" shoutrrr; then
+        rm -rf "$tmp"; echo "  WARNING: shoutrrr extract failed" >&2; return 1
+    fi
+    if ! install -m 755 "$tmp/shoutrrr" "$bin"; then
+        rm -rf "$tmp"; echo "  WARNING: shoutrrr install failed" >&2; return 1
+    fi
+    echo "$SHOUTRRR_VERSION" > "$marker"
+    rm -rf "$tmp"
+    echo "Installed shoutrrr $SHOUTRRR_VERSION (verified against GitHub digest)"
+}
+
+# Deliver an alert on the shared homelab channel (HOMELAB_ALERT_SHOUTRRR_URL in
+# common.env — the one URL the Beszel hub and scrutiny also use; backend Pushover).
+#
+# Always logs to syslog and stdout first, so the alert survives a missing CLI or an
+# unset URL — an unconfigured channel degrades to "logged only" rather than to
+# silence. Returns non-zero only when a send was attempted and failed, letting a
+# caller retry on its next run.
+#
+# Usage: send_alert "homelab backup" "forgejo dump failed on $(hostname)" [syslog-tag]
+send_alert() {
+    local title="$1" message="$2" tag="${3:-homelab-alert}"
+
+    logger -t "$tag" "$title - $message" 2>/dev/null || true
+    echo "ALERT: $title - $message"
+
+    if [ -z "${HOMELAB_ALERT_SHOUTRRR_URL:-}" ]; then
+        return 0
+    fi
+    if ! command -v shoutrrr &>/dev/null; then
+        echo "  WARNING: HOMELAB_ALERT_SHOUTRRR_URL set but 'shoutrrr' CLI missing; logged only" >&2
+        return 0
+    fi
+    if ! shoutrrr send --url "$HOMELAB_ALERT_SHOUTRRR_URL" --title "$title" --message "$message"; then
+        echo "  WARNING: shoutrrr send failed" >&2
+        return 1
+    fi
+}
+
 # Resolve the env file and config directory, then source common.env
 # (shared vars) followed by the machine-specific env file (overrides).
 # Creates /etc/homelab.env symlink so future runs need no arguments.
