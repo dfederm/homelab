@@ -46,8 +46,9 @@ services:
       start_period: 10s
 
   # Declaratively ensures the configured models are present. Runs once each deploy after
-  # the server is healthy, then exits. `ollama pull` is idempotent (already-present models
-  # are skipped) and runs server-side, so this is a thin API client — no volume needed.
+  # the server is healthy, then exits. Already-downloaded layers are cache hits, but the tag's
+  # manifest is re-fetched from the registry every time (see services/ai/ollama-models.lock), and
+  # it runs server-side, so this is a thin API client — no volume needed.
   # A large pull (e.g. qwen3:30b) downloads in the background; follow it with
   # `docker logs -f ollama-pull`.
   ollama-pull:

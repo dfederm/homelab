@@ -461,13 +461,58 @@ First-run setup notes:
 
 Models are **pulled declaratively**: the `ollama-pull` container pulls everything in
 `OLLAMA_PULL_MODELS` (set per machine in the env file; `.env.template` documents the
-recommended set) on each deploy, once the server is healthy, then exits. This is
-idempotent — already-present models are skipped. Large pulls run in the background; follow
-progress with:
+recommended set) on each deploy, once the server is healthy, then exits. Already-downloaded
+layers are cache hits, so a re-run costs little — but note the tag's manifest is re-fetched
+from the registry every time, which is what the digest check below is for. Large pulls run in
+the background; follow progress with:
 ```bash
 docker logs -f ollama-pull
 ```
 To pull an extra model ad-hoc: `docker exec ollama ollama pull <model>`.
+
+#### Model digests
+
+Container images here are pinned by tag **and** digest, so the exact bits are reviewable in
+git. **Ollama models cannot be pinned that way**: `name@sha256:...` is rejected by Ollama's
+model-name parser, and registry.ollama.ai will not serve a manifest by digest either. A model
+tag is therefore mutable — and because `ollama pull` re-fetches the manifest on every deploy
+and prints the same output either way, an upstream re-point would otherwise arrive with no
+diff and no trace, leaving no way to tell whether a change in answer quality came from a
+change in the model.
+
+Models are consequently digest-**checked** rather than digest-pinned:
+
+- [`services/ai/ollama-models.lock`](services/ai/ollama-models.lock) records the **expected**
+  digest per model tag. It is a catalog — it may list more models than any one machine pulls,
+  and each machine still selects what it wants via `OLLAMA_PULL_MODELS`.
+- [`services/ai/post-up.sh`](services/ai/post-up.sh) runs after each deploy, waits for
+  `ollama-pull` to finish, and compares what each tag **actually** resolved to against that
+  file. A mismatch prints a loud drift report naming both digests and the line to commit; a
+  model with no entry is reported as unrecorded. It never fails the deploy — by the time it
+  runs the stack is already up, and drift is information, not a reason to go red. It waits up
+  to 3 minutes; a first deploy that is still downloading many GB is not stalled, it just defers
+  the check to the next deploy.
+- It also appends a tab-separated `<utc>	<model>	<digest>` row to
+  `${DOCKER_APPDATA_ROOT}/ollama-model-history/digests.log`
+  whenever the observed digest changes. This covers **every model present locally**, not just the
+  configured ones, so a model pulled by hand to compare against another is on record too. The
+  lockfile says what *should* run and only changes when someone commits; this log says what *did*
+  run, which is what you need to answer "was this model the same in June as it is now?" It lives
+  under `DOCKER_APPDATA_ROOT` rather than next to the models because `OLLAMA_MODELS_ROOT` may be a
+  scratch volume that gets wiped and re-pulled.
+
+Deploys are run detached and their output is truncated on the next run, so treat the log — not the
+console report — as the durable record. The drift report does re-print on every deploy until the
+lockfile is updated, so it is not lost, just unread until someone looks.
+
+When a drift report is expected — a deliberate model update — record the new digest in the
+lockfile in the same commit that makes the change.
+
+Renovate manages the container image pins but deliberately does **not** cover models: the tag
+list Ollama publishes carries no digests, so nothing there can detect a re-point, and a newer
+model generation is a *different* package (`qwen3.6` vs `qwen3`) rather than a newer version of
+a declared one, which Renovate would never discover. Updating a model stays a manual decision;
+this mechanism only guarantees it is a *visible* one.
 
 Open WebUI's **web search** is wired to the self-hosted SearXNG backend (see below), not
 the built-in DuckDuckGo scraper.
