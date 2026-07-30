@@ -254,7 +254,7 @@ services:
     # Pinned by tag AND digest (like forgejo/ollama). Renovate can't reach this private registry, so
     # bump both by hand: get the newest tag from the athena-mcp CI publish job summary and the digest
     # from that build's registry manifest.
-    image: ${CONTAINER_REGISTRY}/david/athena-mcp:0.1.20@sha256:fcd39d5905f1e0188a5bdbe31b6fd3beca2d10e16da50c09362a7a68ff5c3d3f
+    image: ${CONTAINER_REGISTRY}/david/athena-mcp:0.1.23@sha256:3fd967ab63a55887cb2d9fb31af9c3df2134ebc80cd977d32388981660483140
     restart: unless-stopped
     environment:
       - TZ=${TZ}
