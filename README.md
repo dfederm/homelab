@@ -502,6 +502,10 @@ docker logs -f ollama-pull
 ```
 To pull an extra model ad-hoc: `docker exec ollama ollama pull <model>`.
 
+Qwen3.6 models are hybrid-thinking: pulling a model does not select a reasoning mode. For
+non-thinking chats over an OpenAI-compatible connection, set the Open WebUI model's
+**Reasoning Effort** advanced parameter to `none`.
+
 Open WebUI's **web search** is wired to the self-hosted SearXNG backend (see below), not
 the built-in DuckDuckGo scraper.
 

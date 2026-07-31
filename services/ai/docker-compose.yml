@@ -61,7 +61,7 @@ services:
   # Declaratively ensures the configured models are present. Runs once each deploy after
   # the server is healthy, then exits. `ollama pull` is idempotent (already-present models
   # are skipped) and runs server-side, so this is a thin API client — no volume needed.
-  # A large pull (e.g. qwen3:30b-instruct) downloads in the background; follow it with
+  # A large pull (e.g. qwen3.6:35b-a3b) downloads in the background; follow it with
   # `docker logs -f ollama-pull`.
   ollama-pull:
     container_name: ollama-pull
@@ -273,7 +273,7 @@ services:
     # Pinned by tag AND digest (like forgejo/ollama). Renovate can't reach this private registry, so
     # bump both by hand: get the newest tag from the athena-mcp CI publish job summary and the digest
     # from that build's registry manifest.
-    image: ${CONTAINER_REGISTRY}/david/athena-mcp:0.1.23@sha256:3fd967ab63a55887cb2d9fb31af9c3df2134ebc80cd977d32388981660483140
+    image: ${CONTAINER_REGISTRY}/david/athena-mcp:0.1.28@sha256:b15edc012160ccddaf66f8133f6ed2b0e816e982aece2a2cb063b03a7e6432fa
     restart: unless-stopped
     environment:
       - TZ=${TZ}
