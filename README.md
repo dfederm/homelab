@@ -102,6 +102,7 @@ Modules are standalone, idempotent scripts in `scripts/setup/modules/`. Each han
 | `configure-ssh` | Harden SSH (key-only auth) and deploy authorized keys | All machines |
 | `configure-storage-alerts` | Periodic threshold alerts for LVM thin-pool + ZFS pool capacity (the storage Beszel can't see) | Proxmox host |
 | `configure-storage-health` | Schedule monthly ZFS scrubs + daily pool health check + SMART self-tests (smartd), with degradation alerting | Proxmox host |
+| `configure-ups-monitoring` | Configure a USB UPS through NUT, expose telemetry to Home Assistant, and alert on telemetry/UPS health failures | Proxmox host |
 | `create-lxcs` | Create/update LXC containers from env var definitions (integrated-GPU passthrough via `_GPU=1`, NVIDIA passthrough via `_NVIDIA_GPU=1`, USB via `_USB_DEVICES`) | Proxmox host |
 | `create-vms` | Create/update VMs (e.g. Home Assistant) | Proxmox host |
 | `create-users` | Create Linux users/groups with aligned UIDs across machines | Docker LXC, NAS LXC |
@@ -122,6 +123,7 @@ setup.sh on Proxmox host
   → configure-proxmox-repos, install-tools, configure-amdgpu, configure-sensors,
     configure-kernel-cmdline, configure-ssh, install-beszel-agent, configure-storage-alerts
   → configure-storage-health (ZFS scrub + SMART self-tests + alerting), configure-scrutiny-collector
+  → configure-ups-monitoring (NUT telemetry + UPS health alerting)
   → configure-lxc-fstrim (periodic thin-pool reclaim for LXC rootfs)
   → configure-nvidia-driver (NVIDIA driver + device nodes)
   → provision-host-volumes (dedicated fast-NVMe volumes, e.g. the Ollama model store)
@@ -319,18 +321,44 @@ run via systemd timers:
     — so a Renovate web-image bump carries the collector automatically, with no second
     version/checksum to keep in lockstep.
 
-**Detection now, push alerting later.** This delivers the *detection*: a failing scrub or
-degraded pool fails its systemd unit (visible via `systemctl --failed` and the journal),
-smartd logs SMART degradation to syslog, and Scrutiny shows drive health on its dashboard.
-Active **push** notifications (ntfy / Pushover / Gotify / Uptime Kuma) are intentionally
-deferred until the homelab alerting backend is chosen — that work will hook ZFS + SMART +
-Scrutiny into the chosen backend in one place.
+Failures are delivered through the shared `HOMELAB_ALERT_SHOUTRRR_URL` channel (Pushover
+in the current deployment) where the component supports it, with systemd/journal logging
+as the fallback. Scrutiny uses the URL directly; the host-side checks use the pinned
+Shoutrrr CLI installed by the setup modules.
 
 **Schedules are opt-out per feature.** Each scheduled task is gated by its schedule env
 var (`ZFS_SCRUB_SCHEDULE`, `ZFS_HEALTH_CHECK_SCHEDULE`, `SMART_SELFTEST_SCHEDULE`,
 `SCRUTINY_COLLECTOR_SCHEDULE`). `.env.template` ships recommended defaults; **clear a value
 (set it empty) to disable that specific feature** — the module then removes the
 corresponding timer. (smartd still runs for monitoring even with self-tests disabled.)
+
+## UPS Monitoring
+
+The Proxmox host can monitor a USB-connected UPS with the `configure-ups-monitoring`
+module. It installs Network UPS Tools (NUT), configures the `usbhid-ups` driver, and
+publishes read-only telemetry on the host's LAN address for monitoring clients.
+
+Set `NUT_UPS_NAME`, `NUT_LISTEN_ADDRESS`, and the optional UPS alert thresholds in the
+host env file, then add `configure-ups-monitoring` to `HOMELAB_SETUP_MODULES`. The module
+fails setup unless NUT reports `ups.status`, `ups.load`, `battery.charge`, and
+`battery.runtime`, so a disconnected or unsupported UPS cannot look successfully
+configured.
+
+Beszel does not currently have native UPS/NUT metrics, and Uptime Kuma has no NUT monitor.
+Home Assistant is the existing dashboard that exposes the full device state:
+
+1. In Home Assistant, go to **Settings → Devices & services → Add Integration** and add
+   **Network UPS Tools (NUT)**.
+2. Use `NUT_LISTEN_ADDRESS`, port `3493`, and leave the optional credentials blank.
+3. Confirm the device exposes status, load, battery charge, and battery runtime. Runtime is
+   a diagnostic entity and may need to be enabled on the integration's entity page.
+
+The host also runs `ups-status-check.sh` every 15 seconds. It alerts through
+`HOMELAB_ALERT_SHOUTRRR_URL` when telemetry remains unavailable, the UPS reports unhealthy
+flags, or load crosses `UPS_LOAD_WARNING_PERCENT`. On-battery alerts are delayed by
+`UPS_ON_BATTERY_ALERT_DELAY_SECONDS` so brief Powerwall transfers do not create noise.
+The NUT shutdown controller (`nut-monitor`) is explicitly disabled: this setup is
+monitoring-only and does not implement automatic shutdown or load shedding.
 
 ## Rebuild & Restore
 

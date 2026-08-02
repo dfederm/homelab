@@ -100,6 +100,66 @@ apt_get() {
     return "$status"
 }
 
+# Install the Shoutrrr CLI used by host-side checks to deliver alerts through
+# HOMELAB_ALERT_SHOUTRRR_URL. Best-effort: callers can continue with syslog-only
+# alerting when GitHub or the release asset is temporarily unavailable.
+# renovate: datasource=github-releases depName=nicholas-fedor/shoutrrr
+SHOUTRRR_VERSION="0.16.3"
+ensure_shoutrrr() {
+    local bin="/usr/local/bin/shoutrrr"
+    local marker="/usr/local/bin/.shoutrrr-version"
+    if [ -x "$bin" ] && [ "$(cat "$marker" 2>/dev/null)" = "$SHOUTRRR_VERSION" ]; then
+        echo "shoutrrr $SHOUTRRR_VERSION already installed"
+        return 0
+    fi
+
+    if ! command -v jq &>/dev/null || ! command -v curl &>/dev/null || ! command -v tar &>/dev/null; then
+        apt_get update -qq >/dev/null
+        apt_get install -y -qq jq curl tar >/dev/null
+    fi
+
+    local repo="nicholas-fedor/shoutrrr"
+    local tag="v${SHOUTRRR_VERSION}"
+    local asset="shoutrrr_linux_amd64_${SHOUTRRR_VERSION}.tar.gz"
+    local digest
+    digest="$(curl -fsSL -H 'Accept: application/vnd.github+json' \
+        "https://api.github.com/repos/${repo}/releases/tags/${tag}" \
+        | jq -r --arg n "$asset" '.assets[] | select(.name == $n) | .digest' \
+        | sed 's/^sha256://')"
+    if ! printf '%s' "$digest" | grep -qE '^[0-9a-f]{64}$'; then
+        echo "  WARNING: could not get a sha256 digest for $asset @ ${tag} from GitHub" >&2
+        return 1
+    fi
+
+    local tmp
+    tmp="$(mktemp -d)"
+    if ! curl -fsSL --retry 3 --retry-delay 2 \
+        "https://github.com/${repo}/releases/download/${tag}/${asset}" -o "$tmp/$asset"; then
+        rm -rf "$tmp"
+        echo "  WARNING: shoutrrr download failed" >&2
+        return 1
+    fi
+    if [ "$(sha256sum "$tmp/$asset" | cut -d' ' -f1)" != "$digest" ]; then
+        rm -rf "$tmp"
+        echo "  WARNING: shoutrrr checksum mismatch" >&2
+        return 1
+    fi
+    if ! tar -xzf "$tmp/$asset" -C "$tmp" shoutrrr; then
+        rm -rf "$tmp"
+        echo "  WARNING: shoutrrr extract failed" >&2
+        return 1
+    fi
+    if ! install -m 755 "$tmp/shoutrrr" "$bin"; then
+        rm -rf "$tmp"
+        echo "  WARNING: shoutrrr install failed" >&2
+        return 1
+    fi
+
+    echo "$SHOUTRRR_VERSION" > "$marker"
+    rm -rf "$tmp"
+    echo "Installed shoutrrr $SHOUTRRR_VERSION (verified against GitHub digest)"
+}
+
 # Ensure a kernel module is loaded now and on every boot (via /etc/modules).
 # Idempotent: only appends to /etc/modules when the module isn't listed.
 #
