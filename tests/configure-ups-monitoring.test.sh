@@ -12,6 +12,7 @@ NUT_CONFIG_DIR="$TEST_ROOT/etc/nut"
 SYSTEMD_UNIT_DIR="$TEST_ROOT/etc/systemd/system"
 SYSTEMCTL_LOG="$TEST_ROOT/systemctl.log"
 SYSTEMCTL_STATE="$TEST_ROOT/systemctl-state"
+UDEVADM_LOG="$TEST_ROOT/udevadm.log"
 
 mkdir -p "$FAKE_REPO/scripts/setup/modules" "$FAKE_BIN" "$SYSTEMCTL_STATE"
 cp "$REPO_DIR/scripts/setup/modules/configure-ups-monitoring.sh" \
@@ -66,18 +67,22 @@ EOF
 
 cat > "$FAKE_BIN/upsc" <<'EOF'
 #!/bin/bash
-cat <<'OUTPUT'
-ups.status: OL
-ups.load: 25
-battery.charge: 100
-battery.runtime: 1800
-OUTPUT
+printf '%s\n' \
+    'ups.status: OL' \
+    'ups.load: 25' \
+    'battery.charge: 100' \
+    'battery.runtime: 1800'
+EOF
+
+cat > "$FAKE_BIN/udevadm" <<'EOF'
+#!/bin/bash
+printf '%s\n' "$*" >> "$UDEVADM_LOG"
 EOF
 
 chmod +x "$FAKE_BIN"/*
 
 export PATH="$FAKE_BIN:$PATH"
-export SYSTEMCTL_LOG SYSTEMCTL_STATE
+export SYSTEMCTL_LOG SYSTEMCTL_STATE UDEVADM_LOG
 
 run_module() {
     REPO_DIR="$FAKE_REPO" \
@@ -104,8 +109,12 @@ fi
 grep -q '^mask --now nut-monitor.service$' "$SYSTEMCTL_LOG"
 grep -q '^restart nut-driver-enumerator.service$' "$SYSTEMCTL_LOG"
 grep -q '^restart nut-server.service$' "$SYSTEMCTL_LOG"
+grep -q '^control --reload-rules$' "$UDEVADM_LOG"
+grep -q '^trigger --subsystem-match=usb --action=change$' "$UDEVADM_LOG"
+grep -q '^settle$' "$UDEVADM_LOG"
 
 : > "$SYSTEMCTL_LOG"
+: > "$UDEVADM_LOG"
 run_module >/dev/null
 
 if grep -q '^mask --now nut-monitor.service$' "$SYSTEMCTL_LOG"; then
@@ -117,5 +126,8 @@ if grep -q '^restart nut-driver-enumerator.service$' "$SYSTEMCTL_LOG" \
     echo "Second run should not restart unchanged NUT services" >&2
     exit 1
 fi
+grep -q '^control --reload-rules$' "$UDEVADM_LOG"
+grep -q '^trigger --subsystem-match=usb --action=change$' "$UDEVADM_LOG"
+grep -q '^settle$' "$UDEVADM_LOG"
 
 echo "configure-ups-monitoring tests passed"

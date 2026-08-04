@@ -50,6 +50,14 @@ echo "Installing NUT..."
 apt_get update -qq >/dev/null
 apt_get install -y -qq nut-client nut-server >/dev/null
 
+# The package installs USB permission rules, but its post-install trigger is
+# gated on a legacy /etc/init.d/udev check that is absent on current Proxmox.
+# Reprocess already-connected USB devices so the NUT group can open the UPS
+# without requiring a physical unplug/replug.
+udevadm control --reload-rules
+udevadm trigger --subsystem-match=usb --action=change
+udevadm settle
+
 if ! ensure_shoutrrr; then
     echo "  WARNING: shoutrrr CLI unavailable; UPS alerts log to syslog only until it installs."
 fi
