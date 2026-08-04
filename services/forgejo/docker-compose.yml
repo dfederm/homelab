@@ -36,7 +36,7 @@ services:
   # uid-1000 perms dance on both.
   forgejo-runner:
     container_name: forgejo-runner
-    image: ghcr.io/dfederm/homelab/forgejo-runner:12.12.0@sha256:268ad0d1d24bd7ecf2386b7c44e8211398dc014ca81d4fd5fbad96fe79af18f5
+    image: ghcr.io/dfederm/homelab/forgejo-runner:12.13.2@sha256:eb6e7bc21973382d261e6eb883dbd27b8cb56939d33a3bfd79a1352b7f9a33a0
     restart: unless-stopped
     user: "0:0"
     depends_on:
