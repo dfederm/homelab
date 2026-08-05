@@ -6,7 +6,7 @@ name: koffan
 services:
   koffan:
     container_name: koffan
-    image: ghcr.io/pansalut/koffan:v2.12.3@sha256:da01169aea510d10fb8ff6e53cee35f3af43cf7da291a1acafb35e757c8e4645
+    image: ghcr.io/pansalut/koffan:v2.13.0@sha256:9bc9fbcdbbff3fac4314f7b2c42bd6cea74cf4a84a11f8a20956b86f9c753121
     restart: unless-stopped
     # Run as root so the root-owned ZFS bind mount at /data is writable with no chown.
     user: "0:0"
