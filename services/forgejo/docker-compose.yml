@@ -5,7 +5,7 @@ services:
     # (Comcast/Hetzner routing), so we pull it from our own ghcr mirror of the genuine upstream image
     # — synced by .github/workflows/mirror-images.yml — rather than trusting a third-party Docker Hub
     # mirror. Renovate pins the exact version + digest here.
-    image: ghcr.io/dfederm/homelab/forgejo:15.0.4@sha256:9e14382433760127c87cb78c4dbc44b45abbb0c09c8479812c8e99b3dc893429
+    image: ghcr.io/dfederm/homelab/forgejo:16.0.2@sha256:2fdfe28b5c68f82f49580e227b84e2afb43af0250e0631a54a386ef3b1d9b759
     restart: unless-stopped
     environment:
       - TZ=${TZ}
