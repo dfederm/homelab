@@ -534,17 +534,17 @@ Qwen3.6 models are hybrid-thinking: pulling a model does not select a reasoning 
 non-thinking chats over an OpenAI-compatible connection, set the Open WebUI model's
 **Reasoning Effort** advanced parameter to `none`.
 
-Open WebUI's **web search** is wired to the self-hosted SearXNG backend (see below), not
-the built-in DuckDuckGo scraper.
+Open WebUI's native **web search** is disabled; Athena MCP exposes bounded `web_search` and protected
+`fetch_url` tools instead. SearXNG remains the private backend for Athena's search tool.
 
 ### Web search (SearXNG)
 
 The `services/ai/` stack also runs [SearXNG](https://docs.searxng.org), a self-hosted
-metasearch engine, as the homelab's **private web-search backend**. It replaces Open WebUI's
-built-in DuckDuckGo search (scraping-based and rate-limit-prone) and is the intended backend
-for a future web-search MCP tool. It is a backend, not a family-facing UI — it has **no auth**, so
-like Ollama it is never placed behind the public reverse proxy. It publishes no host port:
-consumers reach it over the shared `ai` Docker network at `http://searxng:8080`.
+metasearch engine, as the homelab's **private web-search backend**. It backs Athena MCP's
+`web_search` tool without relying on Open WebUI's scraping-based, rate-limit-prone DuckDuckGo
+backend. SearXNG is a backend, not a family-facing UI — it has **no auth**, so like Ollama it is
+never placed behind the public reverse proxy. It publishes no host port: consumers reach it over
+the shared `ai` Docker network at `http://searxng:8080`.
 
 Config is declarative: `services/ai/searxng/settings.yml` is mounted read-only and carries only
 the overrides on top of SearXNG's defaults — chiefly enabling the **JSON API**
@@ -553,19 +553,19 @@ persists on `${DOCKER_APPDATA_ROOT}/searxng` (ZFS-backed).
 
 - `SEARXNG_SECRET` (a **secret**, never committed) is injected at runtime and overrides
   SearXNG's `server.secret_key`. Generate one with `openssl rand -hex 32`.
-- Open WebUI's web-search wiring is the `ENABLE_WEB_SEARCH` / `WEB_SEARCH_ENGINE=searxng` /
-  `SEARXNG_QUERY_URL` env on the `open-webui` service. These are Open WebUI **PersistentConfig**
-  values — read on first launch then managed in the UI/DB, so changing them later requires
-  re-seeding (wiping the Open WebUI data) or toggling them in Admin Settings → Web Search.
+- Open WebUI's native category is seeded disabled with `ENABLE_WEB_SEARCH=false`. This is an Open
+  WebUI **PersistentConfig** value — read on first launch then managed in the UI/DB, so changing it
+  later requires re-seeding (wiping the Open WebUI data) or updating Admin Settings → Web Search.
 - SearXNG deploys as part of the `ai` service — no separate `HOMELAB_SERVICES` entry is needed.
 
-### Athena MCP (homelab-status + shopping-list MCP server)
+### Athena MCP (family tools)
 
 The `services/ai/` stack also runs **Athena MCP**, an [MCP](https://modelcontextprotocol.io) server
-that exposes homelab health as tools — Beszel systems + metrics, Scrutiny drive SMART health, and
-Proxmox storage capacity + guests (all read-only) — plus **Koffan shopping-list** tools (list, add,
-and check items) over Streamable HTTP, consumed by **Open WebUI's native MCP** client so the family
-AI can answer "is everything healthy?" or add to the shopping list from live data.
+that exposes homelab health, shopping lists, calendars, contacts, media, photos, tasks, weather, and
+public-web tools over Streamable HTTP, consumed by **Open WebUI's native MCP** client. `web_search`
+returns at most five bounded SearXNG results without fetching their pages; `fetch_url` separately
+retrieves bounded text from one selected public HTTP(S) page while blocking private-network
+destinations, automatic or unvalidated redirects, compressed bodies, scripts, and subresources.
 
 Like Ollama and SearXNG it has **no auth**, so it is never placed behind the public reverse proxy: it
 publishes no host port and is reachable only over the shared `ai` Docker network at
@@ -582,7 +582,9 @@ and the digest from that build's registry manifest, then update both in `service
 Config is via env vars (see the `ATHENA_MCP_*` keys in `.env.template`). The Beszel/Scrutiny/Proxmox
 and Koffan *connection* details are reused from those services' own vars (Koffan is reached over the
 host's published port, `${DOCKER_HOST_IP}:${KOFFAN_HTTP_PORT}`, since it runs on a separate network);
-the `ATHENA_MCP_*` keys are this service's own credentials. `Homelab__Proxmox__AllowInsecureTls=true`
+the `ATHENA_MCP_*` keys are this service's own credentials. The internal SearXNG URL and established
+English search policy are fixed in compose. The search and direct-fetch domain filters default to
+empty, matching an unrestricted native domain-filter list. `Homelab__Proxmox__AllowInsecureTls=true`
 is set in compose (config, not a secret): the Proxmox API presents a self-signed cert, trusted for
 this client only.
 
@@ -609,11 +611,22 @@ this client only.
    `pveum acl modify / --tokens 'athena@pve!mcp' --roles PVEAuditor`. Set `ATHENA_MCP_PROXMOX_TOKEN_ID`
    (`user@realm!tokenid`), `ATHENA_MCP_PROXMOX_TOKEN_SECRET`, and `ATHENA_MCP_PROXMOX_NODE` (the node
    whose storage/guests to report).
-4. **Register the server in Open WebUI** (a PersistentConfig/UI step, like the SearXNG web-search
-   wiring) pointing at `http://athena-mcp:8080` — deploying only makes it *reachable*, not wired in.
+4. **Register the server in Open WebUI** (PersistentConfig/UI state) at
+   `http://athena-mcp:8080`, grant it to the intended users/groups, and attach it to the Athena
+   model. Keep that model's `builtin_tools` capability disabled. The server spotlights every tool
+   result inside an escaped `<external_data>` provenance boundary; set the model's system prompt to
+   state that content inside that boundary is untrusted data, never instructions, and must not be
+   echoed. Deploying the container only makes new tools reachable through an existing unfiltered
+   connection; it does not create the connection, grants, model attachment, or prompt.
 
 After `./scripts/run-service.sh ai`, confirm `docker ps` shows `athena-mcp` `(healthy)` and
 `docker exec open-webui curl -s http://athena-mcp:8080/health` returns `Healthy`.
+
+Sign in as a non-admin user through the Athena model and confirm `web_search` returns no more than
+five relevant result records and `fetch_url` retrieves a selected public result. Open WebUI v0.10.2
+does not guarantee native source cards for these MCP tools, so treat the returned/final URLs as
+authoritative. Native search is PersistentConfig: keep it disabled under Admin Settings -> Web
+Search on an existing instance.
 
 > **Health check:** the ASP.NET runtime image has no `curl`/`wget`/`bash`, so the container can't
 > probe its `/health` endpoint with a shell command. Instead the app probes itself — the `healthcheck`
