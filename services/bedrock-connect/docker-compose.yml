@@ -1,7 +1,7 @@
 services:
   bedrock-connect:
     container_name: bedrock-connect
-    image: pugmatt/bedrock-connect:1.68.0@sha256:f1c32e3f3a9b4603722499fb34d8d63e0e51765f91f86839bc1e03d25d44b546
+    image: pugmatt/bedrock-connect:1.69.0@sha256:c3f1ba4df80c32df7f36236fda72df732ec293c206efe37c61c323f2f4d6e9f4
     restart: unless-stopped
     environment:
       - TZ=${TZ}
