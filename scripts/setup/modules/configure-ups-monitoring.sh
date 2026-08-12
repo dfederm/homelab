@@ -121,8 +121,8 @@ else
 fi
 
 if [ "$changed" = 1 ]; then
-    if systemctl list-unit-files nut-driver-enumerator.service --no-legend 2>/dev/null \
-        | grep -q '^nut-driver-enumerator.service'; then
+    unit_files=$(systemctl list-unit-files nut-driver-enumerator.service --no-legend 2>/dev/null || true)
+    if grep -q '^nut-driver-enumerator.service' <<< "$unit_files"; then
         systemctl restart nut-driver-enumerator.service
     else
         upsdrvctl stop >/dev/null 2>&1 || true

@@ -30,7 +30,8 @@ if ! zpool list -H -o name "$POOL" >/dev/null 2>&1; then
     exit 1
 fi
 
-if zpool status "$POOL" | grep -q 'scrub in progress'; then
+pool_status=$(zpool status "$POOL")
+if grep -q 'scrub in progress' <<< "$pool_status"; then
     echo "A scrub is already in progress on '$POOL'; not starting another."
 else
     echo "Starting scrub of '$POOL' (waiting for completion)..."

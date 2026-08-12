@@ -58,6 +58,9 @@ case "$1" in
         ;;
     list-unit-files)
         echo "nut-driver-enumerator.service enabled"
+        for i in $(seq 1 200000); do
+            echo "filler-${i}.service disabled"
+        done
         ;;
     is-active)
         [ "${*: -1}" = "nut-server.service" ]

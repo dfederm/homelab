@@ -35,7 +35,8 @@ STATIC_DNS="${STATIC_DNS:-$NETWORK_ROUTER_IP}"
 DESIRED_DNS=$(echo "$STATIC_DNS" | tr ',' ' ' | xargs | tr ' ' ',')
 
 # Identify the connection on the interface that owns the default route.
-PRIMARY_IFACE=$(ip -o -4 route show default 2>/dev/null | awk '{print $5; exit}')
+default_routes=$(ip -o -4 route show default 2>/dev/null)
+PRIMARY_IFACE=$(awk '{print $5; exit}' <<< "$default_routes")
 if [ -z "$PRIMARY_IFACE" ]; then
     echo "ERROR: no default-route interface found; cannot pin static IP" >&2
     exit 1

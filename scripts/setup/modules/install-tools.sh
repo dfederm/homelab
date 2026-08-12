@@ -14,7 +14,8 @@ apt_get update -qq > /dev/null
 apt_get install -y -qq git jq htop curl locales > /dev/null
 
 # Generate locale to suppress perl locale warnings in LXCs
-if ! locale -a 2>/dev/null | grep -q "en_US.utf8"; then
+available_locales=$(locale -a 2>/dev/null || true)
+if ! grep -q "en_US.utf8" <<< "$available_locales"; then
     sed -i 's/^# *en_US.UTF-8/en_US.UTF-8/' /etc/locale.gen
     locale-gen > /dev/null 2>&1
 fi

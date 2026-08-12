@@ -107,7 +107,7 @@ apt_offers_version() {
 apt_offered_versions() {
     local versions
     versions=$(apt-cache madison "$1" 2>/dev/null) || return 0
-    awk '{ print $3 }' <<< "$versions" | head -5 | tr '\n' ' '
+    awk 'NR <= 5 { print $3 }' <<< "$versions" | tr '\n' ' '
 }
 
 # Whether an in-tree driver still owns the GPUs. Until one is unloaded — which

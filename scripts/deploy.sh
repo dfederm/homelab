@@ -21,7 +21,8 @@ log "=== Deploy: $(hostname) ==="
 cd "$REPO_DIR"
 
 # Needed when the repo is bind-mounted from a different host/user
-if ! git config --global --get-all safe.directory 2>/dev/null | grep -qFx "$REPO_DIR"; then
+safe_directories=$(git config --global --get-all safe.directory 2>/dev/null || true)
+if ! grep -qFx "$REPO_DIR" <<< "$safe_directories"; then
     git config --global --add safe.directory "$REPO_DIR"
 fi
 
