@@ -21,7 +21,7 @@ services:
   # physical disks live) and POSTs here — see scripts/setup/modules/configure-scrutiny-collector.sh.
   scrutiny-web:
     container_name: scrutiny-web
-    image: ghcr.io/analogj/scrutiny:v0.9.2-web@sha256:71be54e9960826f356fe290eb196762b2e18001e39f6ee09eeb17fe926acbf2c
+    image: ghcr.io/analogj/scrutiny:v0.9.3-web@sha256:a8c488a625bb79701338403b84a6d025f0884a35d348e412335bbd090f06ff3f
     restart: unless-stopped
     ports:
       - "${SCRUTINY_WEB_PORT}:8080"
