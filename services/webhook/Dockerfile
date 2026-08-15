@@ -2,5 +2,5 @@ FROM almir/webhook:2.8.3@sha256:f77cc91c91d1527b48052280af38b50791e842ad8dd291e9
 USER root
 RUN apk add --no-cache bash openssh-client
 COPY services/webhook/dispatch.sh scripts/lib.sh /opt/homelab/scripts/
-COPY services/webhook/hooks.json /etc/webhook/hooks.json
+COPY services/webhook/hooks.json /opt/homelab/hooks.json
 RUN chmod 755 /opt/homelab/scripts/dispatch.sh

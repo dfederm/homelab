@@ -16,4 +16,4 @@ services:
       - WEBHOOK_SECRET=${WEBHOOK_SECRET}
       - DEPLOY_KEY_PATH=/config/deploy_key
       - CONFIG_DIR=/config/env
-    command: ["-template", "-hooks", "/etc/webhook/hooks.json", "-verbose"]
+    command: ["-template", "-hooks", "/opt/homelab/hooks.json", "-verbose"]

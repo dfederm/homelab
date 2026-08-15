@@ -37,6 +37,15 @@ fi
 grep -qF 'context: ../..' "$COMPOSE_FILE"
 grep -qF 'COPY services/webhook/dispatch.sh scripts/lib.sh /opt/homelab/scripts/' \
     "$REPO_DIR/services/webhook/Dockerfile"
+grep -qF 'COPY services/webhook/hooks.json /opt/homelab/hooks.json' \
+    "$REPO_DIR/services/webhook/Dockerfile"
+grep -qF 'command: ["-template", "-hooks", "/opt/homelab/hooks.json", "-verbose"]' \
+    "$COMPOSE_FILE"
+if grep -qF '/etc/webhook/hooks.json' \
+    "$REPO_DIR/services/webhook/Dockerfile" "$COMPOSE_FILE"; then
+    echo "webhook hook config still uses the image's declared volume" >&2
+    exit 1
+fi
 if grep -qE 'apk add .*git|apk add .*util-linux' \
     "$REPO_DIR/services/webhook/Dockerfile"; then
     echo "webhook image still installs obsolete Git/locking tools" >&2
