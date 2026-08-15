@@ -28,6 +28,8 @@ if [ "$1 $2 $3 $4" = "config --global --get-all safe.directory" ]; then
     seq 1 200000
 elif [ "$1 $2 $3" = "config --global --add" ]; then
     echo "safe-directory-added" >> "$COMMAND_LOG"
+elif [ "$1 $2" = "rev-parse HEAD^{commit}" ]; then
+    printf '%040d\n' 1
 else
     printf '%s\n' "$*" >> "$COMMAND_LOG"
 fi
@@ -45,8 +47,12 @@ printf 'bash %s\n' "$*" >> "$COMMAND_LOG"
 EOF
 chmod +x "$deploy_bin/bash"
 deploy_log="$TEST_ROOT/deploy.log"
+deploy_env="$TEST_ROOT/deploy.env"
+deploy_state="$TEST_ROOT/deploy-state"
 : > "$deploy_log"
-if EXPECTED_REPO="$REPO_DIR" COMMAND_LOG="$deploy_log" PATH="$deploy_bin:$PATH" \
+printf 'DEPLOY_STATE_DIR=%s\n' "$deploy_state" > "$deploy_env"
+if EXPECTED_REPO="$REPO_DIR" COMMAND_LOG="$deploy_log" \
+    HOMELAB_SYSTEM_ENV="$deploy_env" PATH="$deploy_bin:$PATH" \
     "$REAL_BASH" "$REPO_DIR/scripts/deploy.sh" >/dev/null; then
     if grep -q '^safe-directory-added$' "$deploy_log"; then
         fail "deploy preserves an existing early safe.directory match"
@@ -55,34 +61,6 @@ if EXPECTED_REPO="$REPO_DIR" COMMAND_LOG="$deploy_log" PATH="$deploy_bin:$PATH" 
     fi
 else
     fail "deploy preserves an existing early safe.directory match"
-fi
-
-echo
-echo "=== dispatch safe-directory check ==="
-dispatch_repo="$TEST_ROOT/dispatch-repo"
-dispatch_bin="$TEST_ROOT/dispatch-bin"
-mkdir -p "$dispatch_repo/scripts" "$dispatch_bin"
-cp "$REPO_DIR/scripts/dispatch.sh" "$dispatch_repo/scripts/dispatch.sh"
-cat > "$dispatch_repo/scripts/lib.sh" <<'EOF'
-source_env() {
-    :
-}
-EOF
-make_git_fake "$dispatch_bin"
-dispatch_log="$TEST_ROOT/dispatch.log"
-deploy_key="$TEST_ROOT/deploy-key"
-: > "$dispatch_log"
-: > "$deploy_key"
-if EXPECTED_REPO="$dispatch_repo" COMMAND_LOG="$dispatch_log" DEPLOY_KEY_PATH="$deploy_key" \
-    HOMELAB_DEPLOY_TARGETS="" PATH="$dispatch_bin:$PATH" \
-    "$REAL_BASH" "$dispatch_repo/scripts/dispatch.sh" >/dev/null; then
-    if grep -q '^safe-directory-added$' "$dispatch_log"; then
-        fail "dispatch preserves an existing early safe.directory match"
-    else
-        pass "dispatch preserves an existing early safe.directory match"
-    fi
-else
-    fail "dispatch preserves an existing early safe.directory match"
 fi
 
 echo

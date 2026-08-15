@@ -7,6 +7,15 @@
 set -euo pipefail
 
 SCRIPT=$(readlink -f "$0")
+
+if [ "${HOMELAB_SETUP_LOCK_HELD:-0}" != "1" ]; then
+    SETUP_LOCK_FILE="${HOMELAB_SETUP_LOCK_FILE:-/run/lock/homelab-setup.lock}"
+    mkdir -p "$(dirname "$SETUP_LOCK_FILE")"
+    echo "Waiting for setup lock: $SETUP_LOCK_FILE"
+    exec flock "$SETUP_LOCK_FILE" env HOMELAB_SETUP_LOCK_HELD=1 \
+        /bin/bash "$SCRIPT" "$@"
+fi
+
 REPOPATH=$(dirname "$(dirname "$SCRIPT")")
 ENV_FILE="/etc/homelab.env"
 

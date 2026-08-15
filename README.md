@@ -24,7 +24,6 @@ All data lives on a ZFS pool and is bind-mounted into containers. The LXC root f
 │   ├── backup/            # Database and volume backup scripts
 │   ├── bootstrap-remote.sh # Bootstrap a new non-LXC machine (SMB mount + first setup)
 │   ├── deploy.sh          # Deploy changes on this machine (pull + setup)
-│   ├── dispatch.sh        # Webhook handler: pulls code, fans out setup to all machines
 │   ├── lib.sh             # Shared helper functions (sourced by other scripts)
 │   ├── recreate-service.sh # Force-recreate a service container
 │   ├── run-all-services.sh
@@ -55,7 +54,7 @@ All data lives on a ZFS pool and is bind-mounted into containers. The LXC root f
     ├── reverse-proxy/     # Caddy
     ├── scrutiny/          # Drive SMART health (web UI + InfluxDB)
     ├── vikunja/           # Vikunja task management (+ Postgres)
-    ├── webhook/           # CI/CD webhook receiver
+    ├── webhook/           # CI/CD webhook receiver and target dispatcher
     └── zwave/             # Z-Wave JS UI
 ```
 
@@ -88,6 +87,7 @@ Modules are standalone, idempotent scripts in `scripts/setup/modules/`. Each han
 | Module | Purpose | Typical machines |
 |--------|---------|-----------------|
 | `configure-amdgpu` | Load AMD GPU kernel driver for hardware transcoding | Proxmox host |
+| `configure-deploy-worker` | Install target-local signal coalescing, serialized setup, and periodic Git reconciliation | Proxmox host, remote machines |
 | `configure-kernel-cmdline` | Ensure the kernel parameters this machine needs (`KERNEL_CMDLINE_PARAMS`, e.g. `iommu=pt`) are set in whichever bootloader config the host actually boots from (`/etc/kernel/cmdline` or `/etc/default/grub`). Never reboots; reports when one is pending | Proxmox host |
 | `configure-pi-kiosk` | Set up Cage + Chromium kiosk browser pointing at a URL (Raspberry Pi specific) | Alarm panel Pi |
 | `configure-scrutiny-collector` | Install Scrutiny SMART collector (pinned binary) + timer; pushes drive health to the Scrutiny web UI | Proxmox host |
@@ -120,7 +120,7 @@ The `create-lxcs` module doesn't just create containers — after creation, it r
 
 ```
 setup.sh on Proxmox host
-  → configure-proxmox-repos, install-tools, configure-amdgpu, configure-sensors,
+  → configure-deploy-worker, configure-proxmox-repos, install-tools, configure-amdgpu, configure-sensors,
     configure-kernel-cmdline, configure-ssh, install-beszel-agent, configure-storage-alerts
   → configure-storage-health (ZFS scrub + SMART self-tests + alerting), configure-scrutiny-collector
   → configure-ups-monitoring (NUT telemetry + UPS health alerting)
@@ -189,12 +189,12 @@ Unlike LXCs, VMs do **not** cascade — they manage their own OS internally. The
 
 ### Adding a Remote Machine
 
-Machines outside Proxmox (e.g. a Raspberry Pi) can't use ZFS bind mounts — they access the repo and config via an SMB mount from the NAS. The `bootstrap-remote.sh` script handles the chicken-and-egg problem: the machine needs the NAS mount to access the repo, but the mount module is in the repo.
+Machines outside Proxmox (e.g. a Raspberry Pi) can't use ZFS bind mounts — they access config and initial bootstrap source via an SMB mount from the NAS. Automated deployments use a local Git checkout afterward. The `bootstrap-remote.sh` script handles the chicken-and-egg problem: the machine needs the NAS mount before it can install that local deployment worker.
 
 **First-time setup:**
 
 1. Create a `<hostname>.env` in the config directory on the NAS (see `.env.template`)
-2. Include `configure-smb-mount` in `HOMELAB_SETUP_MODULES` so the mount persists across reboots
+2. Include `configure-smb-mount` followed by `configure-deploy-worker` in `HOMELAB_SETUP_MODULES` so the mount persists across reboots and the top-level deployment worker is installed
 3. Copy `bootstrap-remote.sh` to the machine and run it:
    ```bash
    scp scripts/bootstrap-remote.sh root@<ip>:/root/
@@ -207,9 +207,9 @@ Machines outside Proxmox (e.g. a Raspberry Pi) can't use ZFS bind mounts — the
    bash /root/bootstrap-remote.sh
    ```
 4. The script mounts the NAS share, links `/etc/homelab.env`, and runs `setup.sh`
-5. Add the machine to `HOMELAB_DEPLOY_TARGETS` in the webhook host's env file so future pushes deploy automatically
+5. Add the machine to `HOMELAB_DEPLOY_TARGETS` and set its `_DEPLOY_HOST` in the webhook host's env file so future pushes wake its worker
 
-After bootstrapping, the machine is fully managed — `dispatch.sh` will SSH into it and run `setup.sh` on every push to `main`, just like the Proxmox host and LXCs.
+After bootstrapping, the machine is fully managed. On every push to `main`, `dispatch.sh` records one pending pass on the target and wakes `homelab-deploy-worker.service`. The worker fetches the latest `origin/main` only after taking the target lock. A path unit preserves signals that arrive during a run, and a timer reconciles missed signals, failed runs, and reboots against the last successful commit. Install the worker only on top-level machines; LXCs reached through a Proxmox cascade are managed by their owning host.
 
 **Pinning a static IP:** to give a remote machine a stable address, set `STATIC_IP` in its `<hostname>.env` and add `configure-network` to `HOMELAB_SETUP_MODULES` (list it first). The module reconciles the address on the connection carrying the default route — it works over Ethernet or WiFi and edits the existing connection in place, so WiFi credentials never leave the machine. It only persists the config; applying it live would drop the session `setup.sh` runs over, so the new address takes effect on the next **reboot** (or a manual `nmcli connection up`). Do the first pin on the device (or over its current address) and reboot, then set the matching `_DEPLOY_HOST` so future pushes reach it at the pinned IP.
 
@@ -930,23 +930,51 @@ One-time admin per mirrored package: none — packages pushed from this public r
 
 ## CI/CD
 
-Pushes to `main` are automatically deployed via a [webhook receiver](https://github.com/adnanh/webhook) running in the Docker LXC. The Docker LXC acts as the deployment coordinator — it pulls the latest code centrally, then fans out to all machines via SSH.
+Pushes to `main` are automatically deployed via a [webhook receiver](https://github.com/adnanh/webhook) running in the Docker LXC. The webhook is only an update signal; each top-level deploy target owns its checkout and coordinator state.
 
 ### How It Works
 
 1. GitHub sends a push event to the webhook endpoint
 2. The webhook validates the HMAC-SHA256 signature and branch
-3. `dispatch.sh` pulls latest code (`git fetch + reset`) — all machines share the repo via NAS mounts, so one pull updates it everywhere
-4. `dispatch.sh` SSHes to each deploy target and kicks off `setup.sh` asynchronously (fire-and-forget)
-5. Each machine's `setup.sh` runs idempotent modules, then deploys services — unchanged modules are no-ops and unchanged containers don't restart
+3. `dispatch.sh` connects to each configured top-level target, atomically records one pending pass, and wakes its worker
+4. Each worker takes the target setup lock before cloning or fetching its reusable local checkout, resets it to the latest `origin/main`, and runs setup synchronously
+5. Signals received while setup is active collapse into one pending pass. After the run succeeds, the worker performs that one trailing pass and fetches the latest `origin/main` again
+6. On success, the worker records the commit it actually ran. A boot and periodic timer fetches `origin/main` and retries whenever it differs from that last successful commit
 
-The async dispatch avoids a self-termination problem: a synchronous deploy chain would eventually restart the webhook container (which is itself a deployed service), killing the dispatch process mid-execution. With fire-and-forget, dispatch completes in seconds before any containers are restarted.
+This is deliberately one running pass plus one pending bit, not a deployment queue. Ten pushes before a worker starts become one deployment of the latest commit. Ten pushes during a run become one trailing deployment, which fetches whatever is latest when it begins. A signal intentionally runs setup even when the Git commit is unchanged, because configuration outside the repository may have changed.
 
-Deploy targets are defined per the prefix-based pattern (`HOMELAB_DEPLOY_TARGETS`). Each target only needs a `_DEPLOY_HOST` — the machine's own env file determines what modules and services it runs.
+Webhook deployment never mutates shared source. Dispatch scripts and hook configuration are baked into the webhook image, and each top-level target updates only its own persistent-but-disposable checkout while holding its setup lock. On a Proxmox target, `create-lxcs` copies that locked source into a stable local path inside each LXC while holding the LXC's setup lock, then runs setup from that copy. `setup.sh` and direct service tools use the same local blocking lock, so neither target nor LXC source can change beneath an active setup or service command.
 
-Deploy results are logged on each target at `/var/log/homelab-deploy.log`.
+Deploy targets are defined per the prefix-based pattern (`HOMELAB_DEPLOY_TARGETS`). Each target needs a `_DEPLOY_HOST` for the low-latency wakeup and must include `configure-deploy-worker` in its `HOMELAB_SETUP_MODULES`. Enable the worker only on top-level targets such as the Proxmox host and independent remote machines; do not enable it on Docker/NAS LXCs already owned by the Proxmox cascade.
 
-For manual deployments (e.g. after changing env files), run `deploy.sh` on the machine, or use `run-service.sh <name>` / `run-all-services.sh` directly. To force-recreate a container (e.g. after changing a bind-mounted config file), use `recreate-service.sh <name>`.
+On a remote machine whose config comes from SMB, order `configure-smb-mount` before `configure-deploy-worker`. The worker's Git checkout is local; only external configuration and secrets remain authoritative on the shared storage.
+
+Target-local deployment data uses these paths by default:
+
+- `${HOMELAB_REPO_DIR}` (`/opt/homelab/repo`) — reusable Git checkout, or stable copied source inside an LXC
+- `${DEPLOY_STATE_DIR}` (`/var/lib/homelab-deploy`) — pending bit, last successful commit, and run/coalescing events
+- `${DEPLOY_LOG_DIR}` (`/var/log/homelab-deploy`) — preserved per-run setup output
+
+For each LXC's first local-copy setup, `create-lxcs` maps the host's resolved
+`CONFIG_DIR` through that LXC's `_MP0`, `_MP1`, ... entries to derive the
+corresponding config path inside the guest. Different LXCs may therefore mount
+the shared homelab root at different guest paths without another setting.
+
+`DEPLOY_RETENTION_DAYS` removes old per-run logs. The event log rotates by `DEPLOY_EVENT_LOG_MAX_BYTES` and retains one previous segment.
+
+### Coordinator Rollout
+
+Roll out the coordinator without letting the old fire-and-forget webhook start overlapping setup runs:
+
+1. Disable the GitHub webhook
+2. Put `DEPLOY_REPOSITORY_URL` and any non-default local path, retention, or reconciliation settings in external env files; add `configure-deploy-worker` to every top-level target after any module that mounts its config
+3. Push only with explicit deployment authorization
+4. Fetch and reset the retained shared checkout to the pushed `origin/main`, then use it to run setup on each top-level target sequentially so workers, local checkouts, timers, and LXC copies are bootstrapped without overlap
+5. Verify `homelab-deploy-worker.path`, `homelab-deploy-worker.timer`, `${HOMELAB_REPO_DIR}`, LXC local copies, and `${DEPLOY_STATE_DIR}/last-success`
+6. Re-enable and redeliver the webhook, then verify one serialized run per top-level target
+7. Retain the old shared checkout for rollback; remove it only as a separate explicitly approved cleanup
+
+For manual deployments (e.g. after changing env files), run `${HOMELAB_REPO_DIR}/scripts/deploy.sh` on a top-level machine. It holds the same local setup lock across its pull and setup phases and records the successful commit. Inside an LXC, run setup and service commands from `${HOMELAB_REPO_DIR}`, not the shared checkout. `run-service.sh <name>` / `run-all-services.sh` use the same lock; `recreate-service.sh <name>` delegates to the locked single-service path.
 
 ### GitHub Webhook Configuration
 

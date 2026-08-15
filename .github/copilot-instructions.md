@@ -20,7 +20,7 @@ Proxmox VE host (Debian)
 - LXC root filesystems are **ephemeral** — destroy and recreate from this repo at any time.
 - All persistent data lives on **ZFS datasets bind-mounted** into containers. No SMB mounts for Docker.
 - Docker containers use **bind mounts to ZFS** (via `${DOCKER_APPDATA_ROOT}`), not named volumes. Named volumes are only acceptable for ephemeral IPC (e.g. Unix sockets between containers).
-- The repo is cloned on the ZFS pool and bind-mounted into LXCs. Changes flow via git push/pull, not direct SMB edits.
+- Automated deployments use persistent local Git checkouts on top-level targets. The Proxmox cascade synchronizes stable local source copies into LXCs; ZFS remains authoritative for config, secrets, and persistent data.
 
 ## Critical Conventions
 
@@ -95,7 +95,7 @@ When writing or modifying setup modules, use these established patterns:
 - **Simple and readable** — Prefer clear bash over clever one-liners. Comment only when the "why" isn't obvious.
 - **No secrets in the repo** — This repo is public. All sensitive values go in env files.
 - **No personal information in the repo** — This repo is designed to be generic and reusable by anyone. Never hardcode IPs, hostnames, usernames, domains, paths, or any setup-specific values into scripts, compose files, or documentation. All such values must be parameterized via env vars. You may prompt the user for personal/setup-specific information to investigate issues, validate configurations, or provide guidance. You may also store such information in memory (via `store_memory`) for future interactions with the same user. But that information must never be committed to the repo.
-- **Don't commit without review, don't push without explicit approval** — Leave changes unstaged for the user to review. Never auto-commit. **Push may trigger immediate deployment** if the user has configured a deploy webhook (typical homelab pattern: push → webhook → fetch+reset shared repo → SSH to every `HOMELAB_DEPLOY_TARGETS` machine and run `setup.sh`). The user may want to stack multiple commits and push as a batch to avoid deploy churn. Always wait for explicit "push" / "deploy" / "go ahead" from the user before `git push`.
+- **Don't commit without review, don't push without explicit approval** — Leave changes unstaged for the user to review. Never auto-commit. **Push may trigger immediate deployment** if the user has configured a deploy webhook (push → webhook signals each top-level target → each worker serializes and coalesces `setup.sh`). The user may want to stack multiple commits and push as a batch to avoid deploy churn. Always wait for explicit "push" / "deploy" / "go ahead" from the user before `git push`.
 - **Surgical changes** — When modifying existing files, change only what's needed. Don't reformat or restructure unrelated code.
 
 ## Testing Changes
@@ -109,7 +109,7 @@ When writing or modifying setup modules, use these established patterns:
 
 - **Module ordering matters** — Modules run in the order listed in `HOMELAB_SETUP_MODULES`. Dependencies must be reflected in ordering (e.g. `configure-amdgpu` before `create-lxcs` so `/dev/dri` exists for GPU passthrough).
 - **run-service.sh runs inside the Docker LXC** — It sources env files and calls `docker compose`. From the Proxmox host, use `pct exec <vmid> -- bash ...` or SSH into the LXC.
-- **Bind mount paths differ per context** — ZFS datasets are mounted at different paths on the host vs inside LXCs. For example, the repo might be at `/<pool>/homelab/repo` on the host but `/mnt/homelab/repo` inside an LXC (determined by the `_MP*` env vars). Always use env vars, never assume paths.
+- **Bind mount paths differ per context** — ZFS data and config datasets are mounted at different paths on the host vs inside LXCs. `create-lxcs` derives the guest config path from each prefix's `_MP*` mappings; deployment source uses `HOMELAB_REPO_DIR`.
 - **The env file discovery chain** — `setup.sh` finds its env file via: (1) explicit CLI argument, (2) `/etc/homelab.env` symlink (created on first run), (3) `<config_dir>/<hostname>.env`. Once resolved, it symlinks to `/etc/homelab.env` for future runs.
 - **ZFS datasets need POSIX ACL support** — If the user reports permission issues, check that `acltype=posixacl` and `xattr=sa` are set on the relevant datasets.
 

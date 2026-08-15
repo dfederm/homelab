@@ -1,8 +1,8 @@
 [
   {
     "id": "deploy",
-    "execute-command": "/repo/scripts/dispatch.sh",
-    "command-working-directory": "/repo",
+    "execute-command": "/opt/homelab/scripts/dispatch.sh",
+    "command-working-directory": "/opt/homelab",
     "pass-arguments-to-command": [
       {
         "source": "payload",

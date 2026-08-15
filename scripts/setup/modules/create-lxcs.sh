@@ -237,6 +237,141 @@ configure_usb_passthrough() {
     return 1
 }
 
+resolve_lxc_config_dir() {
+    local prefix="$1"
+    local host_config_dir
+    local best_source=""
+    local best_target=""
+    local i=0
+
+    host_config_dir=$(readlink -f "$CONFIG_DIR")
+
+    while true; do
+        local mp_var="${prefix}_MP${i}"
+        local mp_value="${!mp_var:-}"
+        [ -z "$mp_value" ] && break
+
+        local source_path="${mp_value%%,*}"
+        source_path="${source_path#volume=}"
+        local target_path=""
+        local field
+        local -a fields=()
+        IFS=',' read -ra fields <<< "$mp_value"
+        for field in "${fields[@]:1}"; do
+            case "$field" in
+                mp=*)
+                    target_path="${field#mp=}"
+                    break
+                    ;;
+            esac
+        done
+
+        local source_real
+        source_real=$(readlink -f "$source_path" 2>/dev/null || true)
+        if [ -n "$source_real" ] && [ -n "$target_path" ] \
+            && { [ "$source_real" = "/" ] \
+                || [ "$host_config_dir" = "$source_real" ] \
+                || [[ "$host_config_dir" = "$source_real/"* ]]; } \
+            && [ "${#source_real}" -gt "${#best_source}" ]; then
+            best_source="$source_real"
+            while [ "$target_path" != "/" ] \
+                && [ "${target_path%/}" != "$target_path" ]; do
+                target_path="${target_path%/}"
+            done
+            best_target="$target_path"
+            [ -n "$best_target" ] || best_target="/"
+        fi
+
+        i=$((i + 1))
+    done
+
+    if [ -z "$best_source" ]; then
+        echo "ERROR: $prefix has no _MP* mapping containing $host_config_dir" >&2
+        return 1
+    fi
+
+    local relative="${host_config_dir#"$best_source"}"
+    if [ "$best_target" = "/" ]; then
+        printf '/%s\n' "${relative#/}"
+    else
+        printf '%s/%s\n' "$best_target" "${relative#/}"
+    fi
+}
+
+sync_repo_and_run_setup() {
+    local vmid="$1"
+    local prefix="$2"
+    local repo_dir="${HOMELAB_REPO_DIR:-/opt/homelab/repo}"
+    local config_dir
+    local lxc_script
+
+    config_dir=$(resolve_lxc_config_dir "$prefix")
+
+    for path in "$repo_dir" "$config_dir"; do
+        if ! [[ "$path" = /* ]] || [[ "$path" = "/" ]] \
+            || [[ "$path" = *".."* ]] \
+            || ! [[ "$path" =~ ^/[A-Za-z0-9._/-]+$ ]]; then
+            echo "ERROR: LXC repo/config paths must be safe absolute paths" >&2
+            exit 1
+        fi
+    done
+
+    read -r -d '' lxc_script <<'EOF' || true
+set -euo pipefail
+
+repo_dir="$1"
+config_dir="$2"
+lock_file="${HOMELAB_SETUP_LOCK_FILE:-/run/lock/homelab-setup.lock}"
+mkdir -p "$(dirname "$lock_file")" "$(dirname "$repo_dir")"
+exec 9> "$lock_file"
+flock 9
+
+staging=$(mktemp -d "$(dirname "$repo_dir")/.homelab-repo.XXXXXX")
+trap 'rm -rf "$staging"' EXIT
+tar -xf - -C "$staging"
+
+same_path_type() {
+    local existing="$1"
+    local desired="$2"
+
+    if [ -L "$existing" ]; then
+        [ -L "$desired" ]
+    elif [ -d "$existing" ]; then
+        [ -d "$desired" ] && [ ! -L "$desired" ]
+    elif [ -f "$existing" ]; then
+        [ -f "$desired" ] && [ ! -L "$desired" ]
+    else
+        [ -e "$desired" ] && [ ! -L "$desired" ] \
+            && [ ! -d "$desired" ] && [ ! -f "$desired" ]
+    fi
+}
+
+if [ -d "$repo_dir" ]; then
+    while IFS= read -r -d '' existing; do
+        relative="${existing#"$repo_dir"/}"
+        if { [ ! -e "$staging/$relative" ] \
+                && [ ! -L "$staging/$relative" ]; } \
+            || ! same_path_type "$existing" "$staging/$relative"; then
+            rm -rf -- "$existing"
+        fi
+    done < <(find "$repo_dir" -mindepth 1 -depth -print0)
+else
+    mkdir -p "$repo_dir"
+fi
+
+cp -a "$staging/." "$repo_dir/"
+rm -rf "$staging"
+trap - EXIT
+
+CONFIG_DIR="$config_dir" HOMELAB_SETUP_LOCK_HELD=1 \
+    bash "$repo_dir/scripts/setup/setup.sh"
+EOF
+
+    tar --exclude=.git -C "$REPO_DIR" -cf - . \
+        | pct exec "$vmid" -- bash -c "$lxc_script" bash \
+            "$repo_dir" "$config_dir"
+}
+
 # Create or update an LXC. COMMON_ARGS go to both pct create/set.
 # CREATE_ARGS go only to pct create (rootfs, features, unprivileged).
 create_or_update_lxc() {
@@ -376,15 +511,15 @@ create_or_update_lxc() {
         sleep 1
     done
 
-    # Run setup inside the LXC (idempotent)
+    # Synchronize a stable local source copy and run setup under the LXC's lock.
     echo "Running setup inside $label $vmid..."
-    pct exec "$vmid" -- bash /mnt/homelab/repo/scripts/setup/setup.sh
+    sync_repo_and_run_setup "$vmid" "$label"
 }
 
 # --- Main ---
 
 # Download Debian LXC template if not cached
-TEMPLATE_DIR="/var/lib/vz/template/cache"
+TEMPLATE_DIR="${LXC_TEMPLATE_DIR:-/var/lib/vz/template/cache}"
 if ! ls "$TEMPLATE_DIR"/debian-*-standard_*_amd64.tar.zst &>/dev/null; then
     echo "Downloading Debian LXC template..."
     pveam update
