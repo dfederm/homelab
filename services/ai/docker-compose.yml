@@ -266,7 +266,7 @@ services:
     # Pinned by tag AND digest (like forgejo/ollama). Renovate can't reach this private registry, so
     # bump both by hand: get the newest tag from the athena-mcp CI publish job summary and the digest
     # from that build's registry manifest.
-    image: ${CONTAINER_REGISTRY}/david/athena-mcp:0.1.30@sha256:199312ee2ca9054669e4a49498f9c93bcc6eaf2cb292af790e55c6b997be38c9
+    image: ${CONTAINER_REGISTRY}/david/athena-mcp:0.1.37@sha256:1cb728717c217f38d452221a75e635d56df2f94ab821d94fbbaf0dabeac4a057
     restart: unless-stopped
     environment:
       - TZ=${TZ}
@@ -302,6 +302,33 @@ services:
       # it never matches a caller), so a member activates by setting their apollo.env creds and
       # re-running the ai service to re-source env — no compose edit (or repo push) needed.
       - Identity__ForwardedUserJwtSecret=${OPEN_WEBUI_FORWARD_USER_JWT_SECRET}
+      # Per-user Home Assistant state and curated exact-target actions. Reads and resolution stay
+      # inside HA's Assist-exposed set; writes require one exact non-group target, a short-lived proof
+      # bound to the authenticated Open WebUI user/chat/message, and the message's single action slot.
+      # The denylist is an additional hazard-focused block on exact entity ids. Empty indexed entries
+      # are ignored; ten slots avoid a compose edit when the live hazard inventory changes.
+      - Apps__HomeAssistant__BaseUrl=http://${HOMEASSISTANT_IP}:${HOMEASSISTANT_HTTP_PORT}
+      - Apps__HomeAssistant__TargetProofLifetimeSeconds=${ATHENA_MCP_HOMEASSISTANT_TARGET_PROOF_LIFETIME_SECONDS:-90}
+      - Apps__HomeAssistant__DeniedEntityIds__0=${ATHENA_MCP_HOMEASSISTANT_DENIED_ENTITY_ID_0}
+      - Apps__HomeAssistant__DeniedEntityIds__1=${ATHENA_MCP_HOMEASSISTANT_DENIED_ENTITY_ID_1}
+      - Apps__HomeAssistant__DeniedEntityIds__2=${ATHENA_MCP_HOMEASSISTANT_DENIED_ENTITY_ID_2}
+      - Apps__HomeAssistant__DeniedEntityIds__3=${ATHENA_MCP_HOMEASSISTANT_DENIED_ENTITY_ID_3}
+      - Apps__HomeAssistant__DeniedEntityIds__4=${ATHENA_MCP_HOMEASSISTANT_DENIED_ENTITY_ID_4}
+      - Apps__HomeAssistant__DeniedEntityIds__5=${ATHENA_MCP_HOMEASSISTANT_DENIED_ENTITY_ID_5}
+      - Apps__HomeAssistant__DeniedEntityIds__6=${ATHENA_MCP_HOMEASSISTANT_DENIED_ENTITY_ID_6}
+      - Apps__HomeAssistant__DeniedEntityIds__7=${ATHENA_MCP_HOMEASSISTANT_DENIED_ENTITY_ID_7}
+      - Apps__HomeAssistant__DeniedEntityIds__8=${ATHENA_MCP_HOMEASSISTANT_DENIED_ENTITY_ID_8}
+      - Apps__HomeAssistant__DeniedEntityIds__9=${ATHENA_MCP_HOMEASSISTANT_DENIED_ENTITY_ID_9}
+      - Apps__HomeAssistant__Users__0__Email=${ATHENA_MCP_HOMEASSISTANT_USER_0_EMAIL}
+      - Apps__HomeAssistant__Users__0__AccessToken=${ATHENA_MCP_HOMEASSISTANT_USER_0_TOKEN}
+      - Apps__HomeAssistant__Users__1__Email=${ATHENA_MCP_HOMEASSISTANT_USER_1_EMAIL}
+      - Apps__HomeAssistant__Users__1__AccessToken=${ATHENA_MCP_HOMEASSISTANT_USER_1_TOKEN}
+      - Apps__HomeAssistant__Users__2__Email=${ATHENA_MCP_HOMEASSISTANT_USER_2_EMAIL}
+      - Apps__HomeAssistant__Users__2__AccessToken=${ATHENA_MCP_HOMEASSISTANT_USER_2_TOKEN}
+      - Apps__HomeAssistant__Users__3__Email=${ATHENA_MCP_HOMEASSISTANT_USER_3_EMAIL}
+      - Apps__HomeAssistant__Users__3__AccessToken=${ATHENA_MCP_HOMEASSISTANT_USER_3_TOKEN}
+      - Apps__HomeAssistant__Users__4__Email=${ATHENA_MCP_HOMEASSISTANT_USER_4_EMAIL}
+      - Apps__HomeAssistant__Users__4__AccessToken=${ATHENA_MCP_HOMEASSISTANT_USER_4_TOKEN}
       - Apps__Vikunja__BaseUrl=http://${DOCKER_HOST_IP}:${VIKUNJA_HTTP_PORT}
       - Apps__Vikunja__Users__0__Email=${ATHENA_MCP_VIKUNJA_USER_0_EMAIL}
       - Apps__Vikunja__Users__0__ApiToken=${ATHENA_MCP_VIKUNJA_USER_0_TOKEN}
@@ -403,38 +430,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-  # HA MCP bridge — exposes Home Assistant's Assist tools to Open WebUI. HA's MCP Server integration
-  # serves SSE, and OWUI's native MCP client only speaks Streamable HTTP at a protocol version HA
-  # rejects, so a native-MCP bridge can't handshake. Instead we use mcpo (the Open WebUI project's
-  # MCP->OpenAPI proxy): it connects to HA's SSE endpoint with the Athena service-account token and
-  # re-exposes the tools as an OpenAPI tool server on the `ai` network. Register it in OWUI as an
-  # OpenAPI tool server at http://ha-mcp-bridge:8000. No auth / no host port; scope = HA's
-  # exposed-to-Assist set. See the README HA-MCP-bridge section.
-  ha-mcp-bridge:
-    container_name: ha-mcp-bridge
-    image: ghcr.io/open-webui/mcpo:main@sha256:1e82c9555c19e50b80745705f32b47a2647589f35279527b5118ecd3a71bd467
-    restart: unless-stopped
-    environment:
-      - TZ=${TZ}
-    command:
-      - --port
-      - "8000"
-      - --server-type
-      - sse
-      - --header
-      - '{"Authorization":"Bearer ${HA_MCP_TOKEN}"}'
-      - --name
-      - home-assistant
-      - --
-      - http://${HOMEASSISTANT_IP}:8123/mcp_server/sse
-    networks:
-      - ai
     logging:
       driver: "json-file"
       options:

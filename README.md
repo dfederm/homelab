@@ -35,7 +35,7 @@ All data lives on a ZFS pool and is bind-mounted into containers. The LXC root f
 │       ├── setup.sh       # Main setup runner (see below)
 │       └── modules/       # Idempotent setup modules
 └── services/              # Docker Compose service definitions
-    ├── ai/               # Ollama (LLM) + Open WebUI (chat) + SearXNG (web search) + Athena MCP (homelab-status + shopping-list MCP)
+    ├── ai/               # Ollama + Open WebUI + SearXNG + Athena MCP family tools
     ├── authelia/          # Single sign-on / OIDC identity provider
     ├── backup/            # Rclone cloud backup
     ├── bedrock-connect/   # Console server-list menu (BedrockConnect) for Minecraft
@@ -561,11 +561,12 @@ persists on `${DOCKER_APPDATA_ROOT}/searxng` (ZFS-backed).
 ### Athena MCP (family tools)
 
 The `services/ai/` stack also runs **Athena MCP**, an [MCP](https://modelcontextprotocol.io) server
-that exposes homelab health, shopping lists, calendars, contacts, media, photos, tasks, weather, and
-public-web tools over Streamable HTTP, consumed by **Open WebUI's native MCP** client. `web_search`
-returns at most five bounded SearXNG results without fetching their pages; `fetch_url` separately
-retrieves bounded text from one selected public HTTP(S) page while blocking private-network
-destinations, automatic or unvalidated redirects, compressed bodies, scripts, and subresources.
+that exposes homelab health, shopping lists, calendars, contacts, media, photos, tasks, weather,
+public-web tools, and curated Home Assistant state/actions over Streamable HTTP, consumed by **Open
+WebUI's native MCP** client. `web_search` returns at most five bounded SearXNG results without
+fetching their pages; `fetch_url` separately retrieves bounded text from one selected public HTTP(S)
+page while blocking private-network destinations, automatic or unvalidated redirects, compressed
+bodies, scripts, and subresources.
 
 Like Ollama and SearXNG it has **no auth**, so it is never placed behind the public reverse proxy: it
 publishes no host port and is reachable only over the shared `ai` Docker network at
@@ -581,14 +582,16 @@ and the digest from that build's registry manifest, then update both in `service
 
 Config is via env vars (see the `ATHENA_MCP_*` keys in `.env.template`). The Beszel/Scrutiny/Proxmox
 and Koffan *connection* details are reused from those services' own vars (Koffan is reached over the
-host's published port, `${DOCKER_HOST_IP}:${KOFFAN_HTTP_PORT}`, since it runs on a separate network);
-the `ATHENA_MCP_*` keys are this service's own credentials. The internal SearXNG URL and established
-English search policy are fixed in compose. The search and direct-fetch domain filters default to
-empty, matching an unrestricted native domain-filter list. `Homelab__Proxmox__AllowInsecureTls=true`
-is set in compose (config, not a secret): the Proxmox API presents a self-signed cert, trusted for
-this client only.
+host's published port, `${DOCKER_HOST_IP}:${KOFFAN_HTTP_PORT}`, since it runs on a separate network).
+Home Assistant reuses `HOMEASSISTANT_IP` / `HOMEASSISTANT_HTTP_PORT`; its per-user tokens and
+hazard-focused denylist use `ATHENA_MCP_HOMEASSISTANT_*`. The other `ATHENA_MCP_*` keys are this
+service's own credentials. The internal SearXNG URL and established English search policy are fixed
+in compose. The search and direct-fetch domain filters default to empty, matching an unrestricted
+native domain-filter list. `Homelab__Proxmox__AllowInsecureTls=true` is set in compose (config, not a
+secret): the Proxmox API presents a self-signed cert, trusted for this client only.
 
-**One-time operator setup** (needs admin on Forgejo/Beszel/Proxmox + write access to the NAS config):
+**One-time operator setup** (needs admin on Forgejo/Beszel/Proxmox/Home Assistant + write access to
+the NAS config):
 
 1. **Give the Docker host registry credentials** so it can pull the image. This is declarative: set
    `CONTAINER_REGISTRY`, `CONTAINER_REGISTRY_USER`, and `CONTAINER_REGISTRY_TOKEN` (a `package:read`
@@ -611,7 +614,13 @@ this client only.
    `pveum acl modify / --tokens 'athena@pve!mcp' --roles PVEAuditor`. Set `ATHENA_MCP_PROXMOX_TOKEN_ID`
    (`user@realm!tokenid`), `ATHENA_MCP_PROXMOX_TOKEN_SECRET`, and `ATHENA_MCP_PROXMOX_NODE` (the node
    whose storage/guests to report).
-4. **Register the server in Open WebUI** (PersistentConfig/UI state) at
+4. **Provision Home Assistant per-user access.** Keep HA's conversation-Assist exposure limited to
+   entities Athena may read. For each Open WebUI family user, create a long-lived token while signed
+   into that same person's HA profile and set the matching
+   `ATHENA_MCP_HOMEASSISTANT_USER_<n>_EMAIL` / `_TOKEN`. The email must match the forwarded Open
+   WebUI identity exactly. Populate `ATHENA_MCP_HOMEASSISTANT_DENIED_ENTITY_ID_<n>` from a fresh
+   hazard inventory so consequential entities can still be read but never receive an action proof.
+5. **Register the server in Open WebUI** (PersistentConfig/UI state) at
    `http://athena-mcp:8080`, grant it to the intended users/groups, and attach it to the Athena
    model. Keep that model's `builtin_tools` capability disabled. The server spotlights every tool
    result inside an escaped `<external_data>` provenance boundary; set the model's system prompt to
@@ -633,39 +642,44 @@ Search on an existing instance.
 > re-invokes the binary as `dotnet /app/AthenaMcp.Server.dll --health-check`, which issues an
 > in-process GET to `/health` and exits `0` (healthy) / non-zero (unhealthy).
 
-### HA MCP bridge (Home Assistant tools in Open WebUI)
+### Home Assistant tools (curated Athena MCP wrapper)
 
-The `services/ai/` stack also runs **`ha-mcp-bridge`**, an [mcpo](https://github.com/open-webui/mcpo)
-proxy (the Open WebUI project's MCP→OpenAPI bridge) that makes Home Assistant's tools available to the
-family AI. HA ships a built-in **MCP Server** integration, but it serves **SSE**, and Open WebUI's
-*native* MCP client only speaks Streamable HTTP at a protocol version HA's current release rejects —
-so a native-MCP bridge can't handshake. mcpo sidesteps that: it connects to HA's SSE endpoint as an
-MCP client (negotiating a compatible version) and re-exposes the tools as an **OpenAPI tool server**
-on the `ai` network at `http://ha-mcp-bridge:8000`, which Open WebUI consumes as a Tool Server.
-(If HA core ever adds Streamable HTTP MCP at a version OWUI accepts, this can be revisited.)
+Home Assistant is integrated directly into Athena MCP instead of through a generic MCP/OpenAPI
+bridge. The wrapper exposes six tools:
 
-Like Ollama/SearXNG/Athena MCP it has **no auth** of its own and publishes no host port — the `ai`
-network + LAN is the trust boundary. The only secret is `HA_MCP_TOKEN`. **What Athena can see and do
-is the capability ratchet:** it is exactly HA's *exposed-to-Assist* entity set — HA has no per-entity
-read-only flag, so an exposed controllable entity (light, lock, cover, …) becomes a callable tool.
-Expose deliberately.
+- `get_home_state` reads current Assist-exposed state.
+- `resolve_home_target` resolves one exact non-group target and may issue a short-lived proof.
+- `set_light`, `set_switch`, `set_fan`, and `set_climate_temperature` perform one fixed,
+  idempotent action against the proved exact entity.
 
-**One-time operator setup** (needs admin on Home Assistant):
+There is no arbitrary service call, toggle, batch, area/floor fan-out, lock, cover, garage, alarm,
+siren, valve, button, scene, script, automation, broadcast, timer cancellation, or Home Assistant
+media control. Jellyfin remains the separate read-only media-library surface.
 
-1. **Enable the integration** in HA: Settings → Devices & Services → Add Integration → **Model
-   Context Protocol Server**. It serves SSE at `/mcp_server/sse`.
-2. **Create a dedicated Athena service account** (Settings → People/Users → Add user — *not* your own
-   login), then sign in as it once and create a **Long-Lived Access Token** (profile → Security →
-   Long-Lived Access Tokens). Put it in `HA_MCP_TOKEN` in the NAS env (never committed).
-3. **Scope exposure = the ratchet.** Settings → Voice assistants → Expose. Expose only what Athena
-   should reach; the MCP server exposes *exactly* this set.
-4. **Register the tool server in Open WebUI** (a PersistentConfig/UI step): Admin Settings → Tools →
-   add an **OpenAPI tool server** at `http://ha-mcp-bridge:8000`; scope it to your account first, then
-   validate a call and confirm unexposed entities are unreachable.
+The server verifies the forwarded Open WebUI user JWT, then selects that person's HA long-lived
+token. Read visibility and target resolution remain bounded by HA's global conversation-Assist
+exposure. Writes add several server-enforced gates:
 
-After `./scripts/run-service.sh ai`, confirm `docker ps` shows `ha-mcp-bridge` up and
-`docker logs ha-mcp-bridge` shows `Successfully connected to 'home-assistant'` (config mode) or a
-`GET …/mcp_server/sse "HTTP/1.1 200 OK"` handshake (single-server mode) + `Application startup complete`.
+1. An exact name must resolve to one supported non-group entity.
+2. Broad or unsupported lookups make that Open WebUI message read-only.
+3. The resolver signs a short-lived proof bound to the caller, chat, message, capability, and entity.
+4. A single in-memory turn ledger permits at most one HA action in that message.
+5. `ATHENA_MCP_HOMEASSISTANT_DENIED_ENTITY_ID_<n>` blocks known hazardous exact entities and groups
+   containing them even when they otherwise resolve.
+
+This safety contract requires **one Athena MCP process**. Do not scale the service to non-sticky
+replicas: another process would have a different turn ledger and could issue a second action budget.
+Drain active Athena responses before replacing the container.
+
+The old HA bridge and the wrapper must never be live as simultaneous action surfaces. For a cutover,
+temporarily restrict the Athena model to the operator, drain active responses, deploy the wrapper
+configuration and bridge removal, apply the coordinated Athena prompt, verify that the existing
+Athena MCP binding exposes the wrapper tools, and remove any legacy HA binding if one exists. Run
+read-only checks before performing only explicitly approved reversible action probes. Keep the
+previous image pin, bridge configuration, Open WebUI model/tool backup, and old bridge token
+available until verification is complete. Rollback restores the prior homelab commit first, waits
+for the old image and bridge to be healthy, then restores the old Open WebUI prompt/binding before
+family access is reopened.
 
 ### Vikunja (task management)
 
