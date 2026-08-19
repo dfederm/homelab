@@ -35,7 +35,7 @@ All data lives on a ZFS pool and is bind-mounted into containers. The LXC root f
 │       ├── setup.sh       # Main setup runner (see below)
 │       └── modules/       # Idempotent setup modules
 └── services/              # Docker Compose service definitions
-    ├── ai/               # Ollama + Open WebUI + SearXNG + Athena MCP family tools
+    ├── ai/               # Ollama + LiteLLM + Open WebUI + SearXNG + Athena MCP
     ├── authelia/          # Single sign-on / OIDC identity provider
     ├── backup/            # Rclone cloud backup
     ├── bedrock-connect/   # Console server-list menu (BedrockConnect) for Minecraft
@@ -423,7 +423,7 @@ surfaces sit behind 2FA. It integrates two ways:
 - **forward-auth** — Caddy can gate a browser-only web UI (e.g. an admin dashboard) by delegating
   the auth decision to Authelia.
 
-**[Open WebUI](#ai-ollama--open-webui) is wired via OIDC**, keeping its local
+**[Open WebUI](#ai-ollama--litellm--open-webui) is wired via OIDC**, keeping its local
 login as break-glass. Some services deliberately stay on their **own** auth because SSO breaks their
 native clients — Jellyfin (TV/mobile apps), Home Assistant (companion app), Radicale (CalDAV Basic
 auth) — which also makes them accidental break-glass access if Authelia is down.
@@ -443,11 +443,12 @@ already resolves the host, so only the Caddy site block is needed. Deploy by add
 pair) and the reusable per-app OIDC / forward-auth recipes are documented in
 [`services/authelia/README.md`](services/authelia/README.md).**
 
-### AI (Ollama + Open WebUI)
+### AI (Ollama + LiteLLM + Open WebUI)
 
 `services/ai/` runs the family AI stack as a single compose project on the shared internal
-`ai` Docker network: [Ollama](https://ollama.com) for local LLM serving, and
-[Open WebUI](https://openwebui.com) as the multi-user chat frontend in front of it.
+`ai` Docker network: [Ollama](https://ollama.com) for local LLM serving,
+[LiteLLM](https://www.litellm.ai/) for authenticated OpenAI-compatible routing and usage
+accounting, and [Open WebUI](https://openwebui.com) as the multi-user chat frontend.
 
 Ollama serves on the CPU by default. On a machine with NVIDIA GPUs it can use them
 instead, which is a per-machine env-file decision rather than a compose change: set
@@ -470,6 +471,27 @@ into the Docker LXC via a `_MP*` entry — to speed up cold model loads (and let
 `${DOCKER_APPDATA_ROOT}/ollama`. Ollama has **no authentication**, so it is never placed
 behind the public reverse proxy — it is reachable only on the internal `ai` network (Open
 WebUI reaches it at `http://ollama:11434`) and, via `OLLAMA_HTTP_PORT`, on the LAN.
+
+LiteLLM is the durable routing boundary between OpenAI-compatible clients and Ollama. Its model
+aliases and backend mappings are deliberately **not** committed to this repository. They live in the
+ZFS-backed `${CONFIG_DIR}/litellm/config.yaml`, mounted read-only into the gateway. This keeps
+workload names and model choices operational configuration: aliases can be added or remapped without
+a repository change, while callers remain independent of Ollama model tags.
+
+Repository scripts do not parse, validate, or rewrite the operator-owned YAML. Keep every backend on
+`ollama_chat/...` at `http://ollama:11434`, omit callbacks and fallback routing, and retain the
+privacy/database settings described below. Declaring a profile does not pull its backend model —
+ensure each selected model is already present through `OLLAMA_PULL_MODELS` or an approved manual
+pull.
+
+LiteLLM publishes `${LITELLM_HTTP_PORT}:4000` for authenticated LAN clients and has no Caddy route.
+Its PostgreSQL state persists under `${DOCKER_APPDATA_ROOT}/litellm/db`. The `ai` post-up hook
+declaratively reconciles every prefix in `LITELLM_CLIENTS`. Each prefix supplies its reporting alias,
+fixed virtual key, and space-separated model allowlist through
+`LITELLM_<PREFIX>_{KEY_ALIAS,API_KEY,MODELS}` in the external env file. `OPEN_WEBUI` is required;
+other clients are configuration-driven. The master key is administrative and must never be given to
+a client. Generate the master key, immutable salt, and each client key independently as `sk-`
+followed by random data.
 
 Open WebUI **does** have its own multi-user auth (the first account created becomes the
 admin), so unlike Ollama it is exposed via Caddy at `OPEN_WEBUI_FQDN`. It is also reachable
@@ -494,29 +516,28 @@ First-run setup notes:
   access) until approved.
 - Switch tool calling to **Native** mode (the prompt-injection "Default" mode is deprecated)
   per model that needs tools.
-- **Chat runs over the OpenAI-compatible connection, not the native Ollama one.** Ollama serves an
-  OpenAI-compatible API at `/v1`, and Open WebUI is pointed at it
-  (`ENABLE_OPENAI_API=true`, `OPENAI_API_BASE_URL=http://ollama:11434/v1`) because Open WebUI's
-  Ollama code path mangles turns that return multiple tool calls, while its OpenAI one handles them.
-  Same server, same models — only the handler differs. The base URL must always stay on the local
-  Ollama; unpinning it would default Open WebUI to `api.openai.com`. The native Ollama connection
-  remains enabled for RAG embeddings and model management. These are PersistentConfig values, so on
-  an already-deployed instance also set them in Admin Settings → Connections, and select the
-  OpenAI-connection copy of the model in the chat. Because the OpenAI protocol has no per-request
-  context field, a model's `num_ctx` set in the Open WebUI UI is ignored on this path — the context
-  window comes from Ollama's `OLLAMA_CONTEXT_LENGTH` instead.
+- **Chat runs through LiteLLM over Open WebUI's OpenAI-compatible connection, not its native Ollama
+  one.** The OpenAI path preserves multiple tool calls that Open WebUI's Ollama middleware mangles;
+  LiteLLM still routes the request only to the same local Ollama server. Keep the base URL fixed at
+  `http://litellm:4000/v1` and select one of the profiles allowed by
+  `LITELLM_OPEN_WEBUI_MODELS`. The native Ollama connection remains enabled for RAG embeddings and
+  model management. Because the OpenAI protocol has no per-request context field, a model's
+  `num_ctx` set in the Open WebUI UI is ignored on this path — the context window comes from
+  Ollama's `OLLAMA_CONTEXT_LENGTH` instead.
+- On a **fresh** Open WebUI database, Compose seeds the LiteLLM URL, its dedicated key, and the
+  `x-litellm-end-user-id: {{USER_ID}}` connection header. That connection also blanks
+  `X-OpenWebUI-User-Jwt` and all `X-OpenWebUI-User-{Name,Id,Email,Role}` headers so the global Athena
+  identity forwarding setting does not copy names or email addresses into LiteLLM. On an
+  **existing** instance these are PersistentConfig: add all those custom headers in Admin Settings
+  → Connections with the same URL and key. Open WebUI substitutes the authenticated user's opaque,
+  stable internal ID server-side; do not substitute a name or email.
 - `OPEN_WEBUI_TASK_MODEL` seeds a small/fast task model (e.g. `qwen2.5:7b`) for
-  title/tag/query generation so the large chat model isn't burned on trivia; it can be
-  changed later in the UI (it is a first-launch-seeded "PersistentConfig" value, set in
-  Admin Settings → Interface). It feeds **both** `TASK_MODEL` and `TASK_MODEL_EXTERNAL`,
-  because Open WebUI chooses between them by the chat model's connection type — set both and
-  the applicable one wins. If neither matches, background tasks run on the large chat model.
-  That is worth avoiding for more than the wasted tokens: Ollama keeps one KV cache slot per
-  model, so a background task on the chat model evicts the conversation's cached prompt prefix
-  and the next user turn re-prefills the whole context, which costs minutes on CPU inference.
-  The task model must also be readable by non-admin users (Admin Settings → Models): background
-  tasks run under the requesting user and are access-checked, and admins bypass that check, so a
-  task model only an admin can read fails for everyone else with no visible error.
+  native-Ollama title/tag/query generation; `OPEN_WEBUI_TASK_MODEL_EXTERNAL` selects the configured
+  LiteLLM profile for the same work. These are first-launch-seeded PersistentConfig values under
+  Admin Settings → Interface. If the applicable model does not resolve, background tasks run on the
+  large chat model. That evicts the conversation's cached prompt prefix and can make the next
+  CPU-served turn re-prefill the whole context. Both task model IDs must also be readable by
+  non-admin users under Admin Settings → Models.
 - `OPEN_WEBUI_RAG_EMBEDDING_MODEL` (e.g. `nomic-embed-text`) is used via the local Ollama
   for RAG embeddings instead of Open WebUI's bundled embedder.
 
@@ -533,6 +554,61 @@ To pull an extra model ad-hoc: `docker exec ollama ollama pull <model>`.
 Qwen3.6 models are hybrid-thinking: pulling a model does not select a reasoning mode. For
 non-thinking chats over an OpenAI-compatible connection, set the Open WebUI model's
 **Reasoning Effort** advanced parameter to `none`.
+
+#### LiteLLM operations, privacy, and rollout
+
+The LiteLLM Admin UI is available only on the authenticated LAN port at
+`http://<docker-host-ip>:${LITELLM_HTTP_PORT}/ui`; sign in as `admin` with
+`LITELLM_MASTER_KEY`. For periodic usage review, group by the configured virtual-key alias first,
+then by model profile. Only the key configured for the `OPEN_WEBUI` prefix makes its opaque end-user
+ID trustworthy for family attribution. The same header on any other client is self-declared and
+must not be interpreted as trusted family identity.
+
+Usage records retain the key, profile, selected backend model, opaque end-user ID, token counts,
+timing, and outcome. `store_prompts_in_spend_logs: false` stores empty request/response objects
+instead of prompt and completion bodies, and `turn_off_message_logging: true` keeps bodies out of
+proxy logs. Do not enable prompt logging or external callbacks. Names and email addresses remain in
+Open WebUI and are not copied into LiteLLM.
+
+Deploy this seam during a low-use window:
+
+1. Create `${CONFIG_DIR}/litellm/config.yaml` on the ZFS-backed config dataset. Define the desired
+   `model_list` there with literal `ollama_chat/...` backends and `api_base: http://ollama:11434`.
+   Set `litellm_settings.turn_off_message_logging: true`, and under `general_settings` set
+   `master_key: os.environ/LITELLM_MASTER_KEY`, `database_url: os.environ/DATABASE_URL`,
+   `store_model_in_db: false`, and `store_prompts_in_spend_logs: false`. Do not configure callbacks
+   or fallbacks.
+2. Put all `LITELLM_*` values documented in `.env.template` in the Docker LXC's external env file.
+   For each `LITELLM_CLIENTS` prefix, make its `_MODELS` values match aliases in the external YAML.
+   Keep `LITELLM_SALT_KEY` unchanged for the lifetime of the database. If a client prefix or key
+   alias is removed or renamed later, delete the old alias in the LiteLLM Admin UI; reconciliation
+   only manages aliases currently listed in `LITELLM_CLIENTS`.
+3. Inside the Docker LXC, deploy `ai`. After the gateway is healthy, the post-up hook creates or
+   updates the configured keys.
+4. With the master key, confirm the LiteLLM model list matches the external config. With each virtual
+   key, confirm its model list and allowlist before migrating a caller.
+5. Validate the initial interactive coding client first with its own key and configured profile; do
+   not give it the master or Open WebUI key. Keep its prior endpoint/model configuration available
+   and restore it immediately if listing, streaming, or inference fails.
+6. Before moving family use, retain the existing direct-Ollama OpenAI connection. On a fresh Open
+   WebUI database, where Compose seeds only LiteLLM, add a separate direct-Ollama OpenAI connection
+   as the rollback path. For an existing database, add a separate LiteLLM connection with the
+   `LITELLM_OPEN_WEBUI_API_KEY` and all custom headers described above; do not replace the direct
+   connection.
+7. Select an allowed interactive profile and verify model listing, streaming, non-thinking controls,
+   the configured external task profile, multiple/parallel Athena tool calls, Athena's signed user
+   identity, and distinct opaque end-user IDs in LiteLLM usage.
+8. Only after those checks pass, point normal family chats at the LiteLLM connection.
+
+If any Open WebUI compatibility or identity check fails, switch chats back to the retained
+direct-Ollama OpenAI connection. If the coding client fails, restore its prior endpoint and model.
+Repository rollback is the prior repository revision, but Open WebUI connection values are
+PersistentConfig and must also be restored in Admin Settings; a Git/Compose revert does not
+overwrite them. The external LiteLLM YAML is outside Git, so copy it to a verified sibling backup
+before each change and restore that copy separately when rolling back. Leave
+`${DOCKER_APPDATA_ROOT}/litellm/db` intact so keys and accounting remain recoverable. Do not delete
+the database directory or rotate the salt as part of rollback. Existing direct Ollama callers are
+otherwise unaffected.
 
 Open WebUI's native **web search** is disabled; Athena MCP exposes bounded `web_search` and protected
 `fetch_url` tools instead. SearXNG remains the private backend for Athena's search tool.

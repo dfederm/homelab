@@ -61,7 +61,7 @@ services:
   # Declaratively ensures the configured models are present. Runs once each deploy after
   # the server is healthy, then exits. `ollama pull` is idempotent (already-present models
   # are skipped) and runs server-side, so this is a thin API client — no volume needed.
-  # A large pull (e.g. qwen3.6:35b-a3b) downloads in the background; follow it with
+  # A large model download continues in the background; follow it with
   # `docker logs -f ollama-pull`.
   ollama-pull:
     container_name: ollama-pull
@@ -86,8 +86,68 @@ services:
         echo "All requested models are present."
     restart: 'no'
 
-  # Multi-user chat / agent frontend in front of Ollama. Reaches the model server over the
-  # internal `ai` network at http://ollama:11434. Open WebUI has its own auth (first account
+  # Internal OpenAI-compatible routing seam. Stable workload names keep callers independent of
+  # backend model IDs while dedicated virtual keys provide durable per-client usage attribution.
+  # The API and Admin UI share one authenticated port, published only to the LAN; there is no Caddy
+  # route. Configuration stays authoritative in ZFS-backed external YAML rather than the database.
+  litellm:
+    container_name: litellm
+    image: ghcr.io/berriai/litellm-database:v1.97.0@sha256:4b3226f4ccd7793d7dca6862d3681604d7ab640d8d6285be6061fd48514e6e71
+    restart: unless-stopped
+    command: ['--config=/app/config.yaml', '--port=4000']
+    depends_on:
+      ollama:
+        condition: service_healthy
+      litellm-db:
+        condition: service_healthy
+    environment:
+      - TZ=${TZ}
+      - DATABASE_URL=postgresql://${LITELLM_DB_USERNAME}:${LITELLM_DB_PASSWORD}@litellm-db:5432/${LITELLM_DB_NAME}
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}
+      - LITELLM_SALT_KEY=${LITELLM_SALT_KEY}
+    volumes:
+      - ${CONFIG_DIR}/litellm/config.yaml:/app/config.yaml:ro
+    ports:
+      - '${LITELLM_HTTP_PORT}:4000'
+    networks:
+      - ai
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:4000/health/readiness')"
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  litellm-db:
+    container_name: litellm-db
+    image: postgres:18@sha256:7157393f508fd8eb46119937fab39813783fe3e7d4c6316c45c12ce2ea25e61d
+    restart: unless-stopped
+    environment:
+      - TZ=${TZ}
+      - POSTGRES_DB=${LITELLM_DB_NAME}
+      - POSTGRES_USER=${LITELLM_DB_USERNAME}
+      - POSTGRES_PASSWORD=${LITELLM_DB_PASSWORD}
+      - PGDATA=/var/lib/postgresql/data
+    volumes:
+      - ${DOCKER_APPDATA_ROOT}/litellm/db:/var/lib/postgresql/data
+    networks:
+      - ai
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -h localhost -U $$POSTGRES_USER -d $$POSTGRES_DB']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # Multi-user chat / agent frontend in front of LiteLLM. LiteLLM then reaches Ollama over the
+  # internal `ai` network. Open WebUI has its own auth (first account
   # created becomes the admin); it is reachable on the LAN via the published port and exposed
   # publicly via Caddy (site block in services/reverse-proxy/Caddyfile).
   # Its SQLite DB + ChromaDB (per-user chats, settings, RAG vectors) persist on ZFS-backed
@@ -106,24 +166,30 @@ services:
     depends_on:
       ollama:
         condition: service_healthy
+      litellm:
+        condition: service_healthy
     environment:
       - TZ=${TZ}
       - OLLAMA_BASE_URL=http://ollama:11434
       # Public URL, used for share links / OAuth redirects / notifications.
       - WEBUI_URL=https://${OPEN_WEBUI_FQDN}
-      # Chat traffic goes through Open WebUI's OpenAI-compatible client, pointed at the SAME local
-      # Ollama's /v1 endpoint (Ollama serves an OpenAI-compatible API alongside its native one).
+      # Chat traffic goes through Open WebUI's OpenAI-compatible client, pointed at LiteLLM's
+      # internal endpoint. LiteLLM exposes stable profile names and remains backed only by Ollama.
       # Reason: Open WebUI's Ollama-specific middleware mangles a turn that returns MULTIPLE tool
       # calls (it concatenates them into one malformed call), which makes athena-mcp error out and
       # the chat hang. Its OpenAI code path handles multi-tool turns correctly. Same server, same
       # model — just the working handler.
-      # ⚠️ OPENAI_API_BASE_URL MUST stay pinned at the local Ollama. Enabling the OpenAI API without
+      # ⚠️ OPENAI_API_BASE_URL MUST stay pinned to the internal gateway. Enabling the OpenAI API without
       # it makes Open WebUI default to https://api.openai.com — i.e. family chats leaving the house.
       # This stack never talks to an external model provider; do not "clean up" this URL.
-      # OPENAI_API_KEY is a placeholder: Ollama ignores it, but the client requires a non-empty value.
       - ENABLE_OPENAI_API=true
-      - OPENAI_API_BASE_URL=http://ollama:11434/v1
-      - OPENAI_API_KEY=ollama
+      - OPENAI_API_BASE_URL=http://litellm:4000/v1
+      - OPENAI_API_KEY=${LITELLM_OPEN_WEBUI_API_KEY}
+      # The global signed forwarded-user JWT below remains enabled for Athena MCP. This connection
+      # blanks that JWT and its PII-bearing fallback headers before reaching LiteLLM, then supplies
+      # only the opaque, server-substituted Open WebUI user id for per-member usage reporting. Trust
+      # it only together with the dedicated open-webui virtual key.
+      - 'OPENAI_API_CONFIGS={"0":{"headers":{"X-OpenWebUI-User-Jwt":"","X-OpenWebUI-User-Name":"","X-OpenWebUI-User-Id":"","X-OpenWebUI-User-Email":"","X-OpenWebUI-User-Role":"","x-litellm-end-user-id":"{{USER_ID}}"}}}'
       # The native Ollama connection stays enabled: RAG_EMBEDDING_ENGINE=ollama below uses it for
       # embeddings (a separate code path, unaffected by the tool-call bug), and it keeps the model
       # list/pull management in the UI working. Chat is what moves to the OpenAI connection.
@@ -140,19 +206,19 @@ services:
       - DEFAULT_USER_ROLE=pending
       # Use the small/fast model for background tasks (title/tag/query generation) so the large chat
       # model isn't burned on trivia.
-      # BOTH vars are needed: Open WebUI picks the task model by the chat model's connection type —
-      # TASK_MODEL for the native Ollama connection, TASK_MODEL_EXTERNAL for the OpenAI-compatible
-      # one — and which applies depends on how the connections are configured in the UI. If neither
-      # matches, background tasks fall back to the chat model itself, which is expensive well beyond
+      # Open WebUI picks the task model by the chat model's connection type: TASK_MODEL is the native
+      # Ollama model id, while TASK_MODEL_EXTERNAL is an externally configured LiteLLM profile. If
+      # the applicable one does not resolve, background tasks fall back to the chat model itself,
+      # which is expensive well beyond
       # the wasted tokens: Ollama serves one KV cache slot per model (OLLAMA_NUM_PARALLEL), so a
       # background task on the chat model evicts the conversation's cached prompt prefix and the
       # user's next turn re-prefills the whole context — minutes on CPU inference.
-      # ⚠️ The model must also be in OLLAMA_PULL_MODELS and readable by non-admin users (Admin
-      # Settings -> Models): background tasks run under the requesting user and are access-checked,
-      # but admins bypass that check, so a task model only an admin can read fails for everyone else
-      # silently, with no error in the UI.
+      # ⚠️ The native model must also be in OLLAMA_PULL_MODELS, and both task model ids must be
+      # readable by non-admin users (Admin Settings -> Models): background tasks run under the
+      # requesting user and are access-checked, but admins bypass that check, so a task model only an
+      # admin can read fails for everyone else silently, with no error in the UI.
       - TASK_MODEL=${OPEN_WEBUI_TASK_MODEL}
-      - TASK_MODEL_EXTERNAL=${OPEN_WEBUI_TASK_MODEL}
+      - TASK_MODEL_EXTERNAL=${OPEN_WEBUI_TASK_MODEL_EXTERNAL}
       # Use the local Ollama embeddings model for RAG instead of Open WebUI's bundled
       # default, so the pulled embeddings model (OPEN_WEBUI_RAG_EMBEDDING_MODEL) is actually used.
       - RAG_EMBEDDING_ENGINE=ollama
