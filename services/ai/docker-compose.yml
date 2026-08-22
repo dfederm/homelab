@@ -12,10 +12,8 @@ services:
       - TZ=${TZ}
       - NVIDIA_VISIBLE_DEVICES=${LLAMA_SWAP_NVIDIA_VISIBLE_DEVICES:?LLAMA_SWAP_NVIDIA_VISIBLE_DEVICES not set}
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
-      - LLAMA_ATHENA_GPU=${LLAMA_ATHENA_GPU}
-      - LLAMA_UTILITY_GPU=${LLAMA_UTILITY_GPU}
     volumes:
-      - ${LLAMA_MODELS_ROOT}:/models:ro
+      - ${LLAMA_MODELS_ROOT:?LLAMA_MODELS_ROOT not set}:/models:ro
       - ${CONFIG_DIR}/llama-swap/config.yml:/etc/llama-swap/config/config.yaml:ro
     networks:
       - ai

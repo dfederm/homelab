@@ -461,16 +461,17 @@ launches three pinned profiles:
 
 | Internal model ID | Purpose | Placement |
 |---|---|---|
-| `qwen3.6-27b` | Athena/family chat, Q4_K_M, non-thinking, 64K, q8 KV, temperature 0.5/top-p 0.8/presence penalty 1.5, one request slot | `LLAMA_ATHENA_GPU` |
-| `qwen2.5-7b` | Open WebUI title/tag/query generation, native 32K context | `LLAMA_UTILITY_GPU` |
-| `nomic-embed-text` | Open WebUI RAG embeddings | `LLAMA_UTILITY_GPU` |
+| `qwen3.6-27b` | Athena/family chat, Q4_K_M, non-thinking, 64K, q8 KV, temperature 0.5/top-p 0.8/presence penalty 1.5, one request slot | Dedicated GPU UUID |
+| `qwen2.5-7b` | Open WebUI title/tag/query generation, native 32K context | Shared utility GPU UUID |
+| `nomic-embed-text` | Open WebUI RAG embeddings | Shared utility GPU UUID |
 
-Use stable GPU UUIDs for `LLAMA_ATHENA_GPU` and `LLAMA_UTILITY_GPU`.
-`LLAMA_SWAP_NVIDIA_VISIBLE_DEVICES` controls which devices Docker exposes, while each child process
-receives only its assigned device. The matrix permits all three profiles to coexist because the
-large model and utility models occupy different cards. llama-swap has no authentication and
-publishes no host port; only LiteLLM can reach it over the internal network. A missing NVIDIA
-runtime or required GPU setting fails deployment rather than silently serving on the CPU.
+Set each model's stable GPU UUID directly in the external llama-swap config through its
+`CUDA_VISIBLE_DEVICES` environment entry. `LLAMA_SWAP_NVIDIA_VISIBLE_DEVICES` only controls which
+devices Docker exposes to the lifecycle owner; Compose does not know workload placement. The matrix
+permits all three profiles to coexist because the large model and utility models occupy different
+cards. llama-swap has no authentication and publishes no host port; only LiteLLM can reach it over
+the internal network. A missing NVIDIA runtime or container GPU setting fails deployment rather than
+silently serving on the CPU.
 
 Model files live under `LLAMA_MODELS_ROOT`, normally a fast volume bind-mounted into the Docker LXC.
 `services/ai/models.txt` pins each public artifact by immutable repository revision and SHA-256.
@@ -493,11 +494,13 @@ model_list:
       model: openai/qwen3.6-27b
       api_base: http://llama-swap:8080/v1
       api_key: none
+      allowed_openai_params: [reasoning_effort]
   - model_name: family-background
     litellm_params:
       model: openai/qwen3.6-27b
       api_base: http://llama-swap:8080/v1
       api_key: none
+      allowed_openai_params: [reasoning_effort]
   - model_name: family-utility
     litellm_params:
       model: openai/qwen2.5-7b
@@ -584,11 +587,10 @@ Open WebUI and are not copied into LiteLLM.
 
 Deploy the stack as follows:
 
-1. Create `${CONFIG_DIR}/llama-swap/config.yml` with the model commands, placement env references,
+1. Create `${CONFIG_DIR}/llama-swap/config.yml` with the model commands, direct stable GPU UUIDs,
    and routing matrix described above.
-2. Set `LLAMA_MODELS_ROOT`, `LLAMA_SWAP_NVIDIA_VISIBLE_DEVICES`, `LLAMA_ATHENA_GPU`, and
-   `LLAMA_UTILITY_GPU` in the Docker LXC's external env file. Add `family-embedding` to
-   `LITELLM_OPEN_WEBUI_MODELS`.
+2. Set `LLAMA_MODELS_ROOT` and `LLAMA_SWAP_NVIDIA_VISIBLE_DEVICES` in the Docker LXC's external env
+   file. Add `family-embedding` to `LITELLM_OPEN_WEBUI_MODELS`.
 3. Replace the external LiteLLM mappings with the `openai/...` entries above. Keep
    `LITELLM_SALT_KEY` unchanged for the lifetime of the database.
 4. Deploy `ai`. The pre-up hook validates the external llama-swap config and verifies/downloads the

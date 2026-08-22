@@ -28,10 +28,6 @@ set +a
 : "${CONTAINER_REGISTRY:?CONTAINER_REGISTRY not set}"
 : "${CONTAINER_REGISTRY_USER:?CONTAINER_REGISTRY_USER not set}"
 : "${CONTAINER_REGISTRY_TOKEN:?CONTAINER_REGISTRY_TOKEN not set}"
-: "${LLAMA_MODELS_ROOT:?LLAMA_MODELS_ROOT not set}"
-: "${LLAMA_SWAP_NVIDIA_VISIBLE_DEVICES:?LLAMA_SWAP_NVIDIA_VISIBLE_DEVICES not set}"
-: "${LLAMA_ATHENA_GPU:?LLAMA_ATHENA_GPU not set}"
-: "${LLAMA_UTILITY_GPU:?LLAMA_UTILITY_GPU not set}"
 
 if [ ! -f "$CONFIG_DIR/llama-swap/config.yml" ]; then
     echo "ERROR: llama-swap config not found: $CONFIG_DIR/llama-swap/config.yml" >&2

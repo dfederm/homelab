@@ -45,8 +45,8 @@ fi
 expect_line "$COMPOSE" "  llama-swap:" "llama-swap service is declared"
 expect_line "$COMPOSE" "    runtime: nvidia" "llama-swap requires the NVIDIA runtime"
 expect_line "$COMPOSE" \
-    '      - ${LLAMA_MODELS_ROOT}:/models:ro' \
-    "model files are mounted read-only"
+    '      - ${LLAMA_MODELS_ROOT:?LLAMA_MODELS_ROOT not set}:/models:ro' \
+    "missing model root fails Compose evaluation"
 expect_line "$COMPOSE" \
     '      - NVIDIA_VISIBLE_DEVICES=${LLAMA_SWAP_NVIDIA_VISIBLE_DEVICES:?LLAMA_SWAP_NVIDIA_VISIBLE_DEVICES not set}' \
     "missing container GPU exposure fails Compose evaluation"
@@ -74,9 +74,29 @@ expect_line "$REPO_DIR/services/ai/pre-up.sh" \
     'if [ ! -f "$CONFIG_DIR/llama-swap/config.yml" ]; then' \
     "deployment requires the external llama-swap config"
 
-for name in LLAMA_MODELS_ROOT LLAMA_SWAP_NVIDIA_VISIBLE_DEVICES LLAMA_ATHENA_GPU LLAMA_UTILITY_GPU; do
+if grep -Fq ': "${LLAMA_MODELS_ROOT:?' "$REPO_DIR/services/ai/pre-up.sh" \
+    || grep -Fq ': "${LLAMA_SWAP_NVIDIA_VISIBLE_DEVICES:?' "$REPO_DIR/services/ai/pre-up.sh"; then
+    fail "pre-up does not validate Compose-owned settings"
+else
+    pass "Compose-owned settings are not redundantly validated in pre-up"
+fi
+
+for name in LLAMA_MODELS_ROOT LLAMA_SWAP_NVIDIA_VISIBLE_DEVICES; do
     expect_line "$ENV_TEMPLATE" "$name=" "$name is documented"
 done
+
+if grep -Fq 'LLAMA_ATHENA_GPU' "$COMPOSE" "$ENV_TEMPLATE" "$REPO_DIR/services/ai/pre-up.sh" \
+    || grep -Fq 'LLAMA_UTILITY_GPU' "$COMPOSE" "$ENV_TEMPLATE" "$REPO_DIR/services/ai/pre-up.sh"; then
+    fail "workload-specific GPU placement does not leak into Compose or env"
+else
+    pass "workload-specific GPU placement stays inside llama-swap config"
+fi
+
+if [ "$(grep -Fc 'allowed_openai_params: [reasoning_effort]' "$REPO_DIR/README.md")" -eq 2 ]; then
+    pass "Qwen3.6 LiteLLM routes allow llama-server reasoning controls"
+else
+    fail "Qwen3.6 LiteLLM routes allow llama-server reasoning controls"
+fi
 
 if [ "$(grep -vc '^#' "$MANIFEST")" -eq 3 ] \
     && ! grep -Ev '^(#|[A-Za-z0-9._/-]+\|[0-9a-f]{64}\|[1-9][0-9]*\|https://)' "$MANIFEST" > /dev/null; then
