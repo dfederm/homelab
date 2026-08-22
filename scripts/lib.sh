@@ -15,6 +15,60 @@ validate_env() {
     done
 }
 
+# Reconcile the system timezone without systemd-timedated. Its namespace
+# hardening cannot start in every LXC, while these files are the underlying
+# Debian timezone interface and work uniformly on hosts and containers.
+configure_system_timezone() {
+    local timezone="$1"
+    local zoneinfo_dir="${2:-/usr/share/zoneinfo}"
+    local localtime_file="${3:-/etc/localtime}"
+    local timezone_file="${4:-/etc/timezone}"
+    local zoneinfo_root
+    local desired_zone
+
+    zoneinfo_root=$(realpath -e -- "$zoneinfo_dir")
+    desired_zone=$(realpath -e -- "$zoneinfo_root/$timezone" 2>/dev/null) || true
+
+    case "$desired_zone" in
+        "$zoneinfo_root"/*) ;;
+        *)
+            echo "ERROR: TZ is not a valid system timezone: $timezone" >&2
+            return 1
+            ;;
+    esac
+
+    if [ ! -f "$desired_zone" ] \
+        || [ "$(LC_ALL=C head -c 4 "$desired_zone")" != "TZif" ]; then
+        echo "ERROR: TZ is not a valid system timezone: $timezone" >&2
+        return 1
+    fi
+
+    local localtime_matches=false
+    local timezone_file_matches=true
+    if [ -L "$localtime_file" ] \
+        && [ "$(realpath -e -- "$localtime_file" 2>/dev/null)" = "$desired_zone" ]; then
+        localtime_matches=true
+    fi
+    if [ -e "$timezone_file" ] \
+        && [ "$(cat "$timezone_file")" != "$timezone" ]; then
+        timezone_file_matches=false
+    fi
+
+    if [ "$localtime_matches" = true ] \
+        && [ "$timezone_file_matches" = true ]; then
+        echo "System timezone already configured: $timezone"
+        return
+    fi
+
+    if [ "$localtime_matches" = false ]; then
+        ln -snf -- "$desired_zone" "$localtime_file"
+    fi
+    if [ "$timezone_file_matches" = false ]; then
+        printf '%s\n' "$timezone" > "$timezone_file"
+    fi
+    echo "System timezone updated: $timezone"
+}
+
 # Run apt-get, waiting out another process that holds an apt lock.
 #
 # Do not "simplify" this into `-o DPkg::Lock::Timeout=N`. That option is read
