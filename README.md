@@ -456,22 +456,13 @@ processes, [LiteLLM](https://www.litellm.ai/) provides authenticated workload al
 accounting, and [Open WebUI](https://openwebui.com) is the multi-user chat frontend.
 
 llama-swap is the only model lifecycle owner. Its operator-owned configuration lives outside this
-public repository at `${CONFIG_DIR}/llama-swap/config.yml`, on the NAS-backed config dataset. It
-launches three pinned profiles:
-
-| Internal model ID | Purpose | Placement |
-|---|---|---|
-| `qwen3.6-27b` | Athena/family chat, Q4_K_M, non-thinking, 64K, q8 KV, temperature 0.5/top-p 0.8/presence penalty 1.5, one request slot | Dedicated GPU UUID |
-| `qwen2.5-7b` | Open WebUI title/tag/query generation, native 32K context | Shared utility GPU UUID |
-| `nomic-embed-text` | Open WebUI RAG embeddings | Shared utility GPU UUID |
-
-Set each model's stable GPU UUID directly in the external llama-swap config through its
-`CUDA_VISIBLE_DEVICES` environment entry. `LLAMA_SWAP_NVIDIA_VISIBLE_DEVICES` only controls which
-devices Docker exposes to the lifecycle owner; Compose does not know workload placement. The matrix
-permits all three profiles to coexist because the large model and utility models occupy different
-cards. llama-swap has no authentication and publishes no host port; only LiteLLM can reach it over
-the internal network. A missing NVIDIA runtime or container GPU setting fails deployment rather than
-silently serving on the CPU.
+public repository at `${CONFIG_DIR}/llama-swap/config.yml`, on the NAS-backed config dataset. Model
+IDs, commands, context and sampling settings, GPU placement, and the routing matrix all belong in
+that external file rather than in this public repository. `LLAMA_SWAP_NVIDIA_VISIBLE_DEVICES`
+controls which devices Docker exposes to the lifecycle owner; Compose does not assign workloads to
+specific devices. llama-swap has no authentication and publishes no host port; only LiteLLM can
+reach it over the internal network. A missing NVIDIA runtime or container GPU setting fails
+deployment rather than silently serving on the CPU.
 
 Model files live under `LLAMA_MODELS_ROOT`, normally a fast volume bind-mounted into the Docker LXC.
 `services/ai/models.txt` pins each public artifact by immutable repository revision and SHA-256.
@@ -482,41 +473,9 @@ the checksum passes.
 LiteLLM is the durable routing boundary between clients and llama-swap. Its model aliases and backend
 mappings are deliberately **not** committed to this repository. They live in the ZFS-backed
 `${CONFIG_DIR}/litellm/config.yaml`, mounted read-only into the gateway. This keeps workload names
-operational: callers continue requesting `family-interactive`, `family-utility`, and
-`family-embedding` while the internal model IDs remain replaceable.
-
-Repository scripts do not rewrite the operator-owned YAML. Configure the backends as:
-
-```yaml
-model_list:
-  - model_name: family-interactive
-    litellm_params:
-      model: openai/qwen3.6-27b
-      api_base: http://llama-swap:8080/v1
-      api_key: none
-      allowed_openai_params: [reasoning_effort]
-  - model_name: family-background
-    litellm_params:
-      model: openai/qwen3.6-27b
-      api_base: http://llama-swap:8080/v1
-      api_key: none
-      allowed_openai_params: [reasoning_effort]
-  - model_name: family-utility
-    litellm_params:
-      model: openai/qwen2.5-7b
-      api_base: http://llama-swap:8080/v1
-      api_key: none
-  - model_name: family-embedding
-    litellm_params:
-      model: openai/nomic-embed-text
-      api_base: http://llama-swap:8080/v1
-      api_key: none
-```
-
-Keep `litellm_settings.turn_off_message_logging: true`; keep the existing database-backed
-`general_settings`; and do not configure external callbacks or fallback providers. Coding aliases
-remain reserved for a separately qualified coding profile and should not be advertised until that
-backend exists.
+stable while internal model IDs remain replaceable. Repository scripts do not rewrite the
+operator-owned YAML. Keep prompt logging disabled, retain the database-backed general settings, and
+do not configure external callbacks or fallback providers.
 
 LiteLLM publishes `${LITELLM_HTTP_PORT}:4000` for authenticated LAN clients and has no Caddy route.
 Its PostgreSQL state persists under `${DOCKER_APPDATA_ROOT}/litellm/db`. The `ai` post-up hook
@@ -525,7 +484,8 @@ fixed virtual key, and space-separated model allowlist through
 `LITELLM_<PREFIX>_{KEY_ALIAS,API_KEY,MODELS}` in the external env file. `OPEN_WEBUI` is required;
 other clients are configuration-driven. The master key is administrative and must never be given to
 a client. Generate the master key, immutable salt, and each client key independently as `sk-`
-followed by random data.
+followed by random data. Give each external client its own prefix and narrow model allowlist so usage
+remains attributable by client.
 
 Open WebUI **does** have its own multi-user auth (the first account created becomes the
 admin), so it is exposed via Caddy at `OPEN_WEBUI_FQDN`. It is also reachable
@@ -552,8 +512,8 @@ First-run setup notes:
   per model that needs tools.
 - **All model traffic runs through LiteLLM over Open WebUI's OpenAI-compatible clients.** Keep the
   chat and RAG base URLs fixed at `http://litellm:4000/v1`, disable the native Ollama API, and select
-  only profiles allowed by `LITELLM_OPEN_WEBUI_MODELS`. The 64K Athena context is fixed in the
-  llama-server profile rather than configured per Open WebUI model.
+  only profiles allowed by `LITELLM_OPEN_WEBUI_MODELS`. Context limits belong in each external
+  llama-server profile rather than in Open WebUI.
 - On a **fresh** Open WebUI database, Compose seeds the LiteLLM URL, its dedicated key, and the
   `x-litellm-end-user-id: {{USER_ID}}` connection header. That connection also blanks
   `X-OpenWebUI-User-Jwt` and all `X-OpenWebUI-User-{Name,Id,Email,Role}` headers so the global Athena
@@ -561,14 +521,13 @@ First-run setup notes:
   **existing** instance these are PersistentConfig: add all those custom headers in Admin Settings
   → Connections with the same URL and key. Open WebUI substitutes the authenticated user's opaque,
   stable internal ID server-side; do not substitute a name or email.
-- `OPEN_WEBUI_TASK_MODEL_EXTERNAL=family-utility` keeps title/tag/query generation on the small
-  model. `TASK_MODEL` is intentionally empty because the native model API is disabled. The external
-  task model must be readable by non-admin users under Admin Settings → Models.
-- `OPEN_WEBUI_RAG_EMBEDDING_MODEL=family-embedding` uses the dedicated embedding profile through
-  LiteLLM. Set Documents → Embedding Engine to `OpenAI`, the URL to
+- `OPEN_WEBUI_TASK_MODEL_EXTERNAL` selects the LiteLLM alias for title/tag/query generation.
+  `TASK_MODEL` is intentionally empty because the native model API is disabled. The external task
+  model must be readable by non-admin users under Admin Settings → Models.
+- `OPEN_WEBUI_RAG_EMBEDDING_MODEL` selects the embedding alias through LiteLLM. Set Documents →
+  Embedding Engine to `OpenAI`, the URL to
   `http://litellm:4000/v1`, and the key to `LITELLM_OPEN_WEBUI_API_KEY` on an existing instance.
-- Qwen3.6 is hybrid-thinking, but the server profile defaults to non-thinking. Keep Open WebUI's
-  Reasoning Effort at `none` for the Athena model.
+- Keep Open WebUI's reasoning setting consistent with the selected external model profile.
 
 #### LiteLLM operations, privacy, and rollout
 
@@ -587,24 +546,24 @@ Open WebUI and are not copied into LiteLLM.
 
 Deploy the stack as follows:
 
-1. Create `${CONFIG_DIR}/llama-swap/config.yml` with the model commands, direct stable GPU UUIDs,
-   and routing matrix described above.
+1. Create `${CONFIG_DIR}/llama-swap/config.yml` with the model commands, hardware assignment, and
+   routing matrix.
 2. Set `LLAMA_MODELS_ROOT` and `LLAMA_SWAP_NVIDIA_VISIBLE_DEVICES` in the Docker LXC's external env
-   file. Add `family-embedding` to `LITELLM_OPEN_WEBUI_MODELS`.
-3. Replace the external LiteLLM mappings with the `openai/...` entries above. Keep
-   `LITELLM_SALT_KEY` unchanged for the lifetime of the database.
+   file.
+3. Configure the external LiteLLM aliases and OpenAI-compatible llama-swap mappings. Add each
+   client prefix and allowlist without changing `LITELLM_SALT_KEY`.
 4. Deploy `ai`. The pre-up hook validates the external llama-swap config and verifies/downloads the
    model files; after LiteLLM is healthy, the
    post-up hook creates or updates the configured client keys.
 5. On an existing Open WebUI instance, update the persisted Connections, Interface, and Documents
    settings described above; Compose env values only seed a fresh database.
-6. Verify model listing, streaming, non-thinking behavior, the external task profile, embeddings,
-   multiple/parallel Athena tool calls, signed user identity, and distinct opaque user IDs in
-   LiteLLM usage.
+6. Verify model listing, streaming, configured reasoning behavior, task generation, embeddings,
+   tool calls, signed user identity, and distinct opaque user IDs in LiteLLM usage.
 
-Rollback is intentionally simple for this currently unused service: restore the prior repository
-revision and external settings, redeploy, and re-download old model data if it has already been
-removed. Do not delete or recreate LiteLLM's database, and never rotate its salt as part of rollback.
+Rollback is intentionally simple for this manually recoverable household service: restore the prior
+repository revision and external settings, redeploy, and re-download old model data if it has
+already been removed. Do not delete or recreate LiteLLM's database, and never rotate its salt as
+part of rollback.
 
 Open WebUI's native **web search** is disabled; Athena MCP exposes bounded `web_search` and protected
 `fetch_url` tools instead. SearXNG remains the private backend for Athena's search tool.

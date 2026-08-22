@@ -92,18 +92,16 @@ else
     pass "workload-specific GPU placement stays inside llama-swap config"
 fi
 
-if [ "$(grep -Fc 'allowed_openai_params: [reasoning_effort]' "$REPO_DIR/README.md")" -eq 2 ]; then
-    pass "Qwen3.6 LiteLLM routes allow llama-server reasoning controls"
+if [ "$(grep -vc '^#' "$MANIFEST")" -eq 4 ] \
+    && ! grep -Ev '^(#|[A-Za-z0-9._/-]+\|[0-9a-f]{64}\|[1-9][0-9]*\|https://)' "$MANIFEST" > /dev/null; then
+    pass "model manifest pins four HTTPS artifacts by SHA-256 and size"
 else
-    fail "Qwen3.6 LiteLLM routes allow llama-server reasoning controls"
+    fail "model manifest pins four HTTPS artifacts by SHA-256 and size"
 fi
 
-if [ "$(grep -vc '^#' "$MANIFEST")" -eq 3 ] \
-    && ! grep -Ev '^(#|[A-Za-z0-9._/-]+\|[0-9a-f]{64}\|[1-9][0-9]*\|https://)' "$MANIFEST" > /dev/null; then
-    pass "model manifest pins three HTTPS artifacts by SHA-256 and size"
-else
-    fail "model manifest pins three HTTPS artifacts by SHA-256 and size"
-fi
+expect_line "$MANIFEST" \
+    "qwen3.8-27b/Qwen3.8-27B-UD-IQ4_XS.gguf|40fac4050e940397dbf13087afd50f4734a11805bf9d65ef8ddd7483470e6199|14252845984|https://huggingface.co/unsloth/Qwen3.8-27B-GGUF/resolve/4ca720788d1e01f1bff70c033e0d0028fd02e502/Qwen3.8-27B-UD-IQ4_XS.gguf" \
+    "Qwen3.8 acquisition is pinned to the verified immutable artifact"
 
 mkdir "$TMP_DIR/bin" "$TMP_DIR/models"
 printf 'test model payload\n' > "$TMP_DIR/source.gguf"
