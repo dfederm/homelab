@@ -461,7 +461,7 @@ launches three pinned profiles:
 
 | Internal model ID | Purpose | Placement |
 |---|---|---|
-| `qwen3.6-27b` | Athena/family chat, Q4_K_M, non-thinking, 64K, q8 KV, temperature 0.5/top-p 0.8, one request slot | `LLAMA_ATHENA_GPU` |
+| `qwen3.6-27b` | Athena/family chat, Q4_K_M, non-thinking, 64K, q8 KV, temperature 0.5/top-p 0.8/presence penalty 1.5, one request slot | `LLAMA_ATHENA_GPU` |
 | `qwen2.5-7b` | Open WebUI title/tag/query generation, native 32K context | `LLAMA_UTILITY_GPU` |
 | `nomic-embed-text` | Open WebUI RAG embeddings | `LLAMA_UTILITY_GPU` |
 
