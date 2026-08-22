@@ -71,6 +71,11 @@ Each machine has a `.env` file (stored outside the repo at `<mount>/homelab/conf
 
 A shared `common.env` in the same directory holds values that must be identical across machines (timezone, network basics, users/groups). It is sourced automatically before the machine-specific file, so machine values can override common ones.
 
+Every Linux `setup.sh` run validates the shared `TZ` value and reconciles the
+machine's system timezone before running optional modules or services. This
+applies to top-level hosts and remote machines as well as LXCs reached through
+the Proxmox cascade.
+
 The runner script discovers the env file automatically by hostname:
 
 ```bash
@@ -185,7 +190,7 @@ VMs follow the same prefix-based pattern as LXCs:
 4. To import an existing disk image on first create, set `_IMAGE` to its path on ZFS
 5. Re-run `setup.sh`
 
-Unlike LXCs, VMs do **not** cascade — they manage their own OS internally. The `_IP` variable is informational (for documentation and other configs) and is not passed to `qm`.
+Unlike LXCs, VMs do **not** cascade — they manage their own OS internally. The `_IP` variable is informational (for documentation and other configs) and is not passed to `qm`. Appliance guests such as Home Assistant OS also own their system timezone internally; their application configuration must declare the same timezone rather than relying on `create-vms`.
 
 ### Adding a Remote Machine
 
@@ -966,7 +971,7 @@ pruning sync delete another's backup).
 
 Machine-specific configuration lives in `.env` files **outside the repo** (not committed — they contain secrets). The `.env.template` in the repo documents all available variables.
 
-A shared `common.env` is sourced first, then the machine-specific file. This keeps values that must be identical across machines (timezone, network basics, users/groups) in one place. Machine-specific values override common ones.
+A shared `common.env` is sourced first, then the machine-specific file. This keeps values that must be identical across machines (timezone, network basics, users/groups) in one place. Machine-specific values override common ones. `TZ` is required: `setup.sh` uses it to reconcile every managed Linux machine's system timezone, and Docker services consume the same value.
 
 Convention:
 ```

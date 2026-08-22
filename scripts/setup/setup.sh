@@ -46,6 +46,30 @@ echo "Modules: ${HOMELAB_SETUP_MODULES:-<none>}"
 echo "Services: ${HOMELAB_SERVICES:-<none>}"
 echo ""
 
+validate_env TZ
+
+available_timezones=$(timedatectl list-timezones)
+timezone_valid=false
+while IFS= read -r timezone; do
+    if [ "$timezone" = "$TZ" ]; then
+        timezone_valid=true
+    fi
+done <<< "$available_timezones"
+
+if [ "$timezone_valid" = false ]; then
+    echo "ERROR: TZ is not a valid system timezone: $TZ" >&2
+    exit 1
+fi
+
+current_timezone=$(timedatectl show --property=Timezone --value)
+if [ "$current_timezone" = "$TZ" ]; then
+    echo "System timezone already configured: $TZ"
+else
+    timedatectl set-timezone "$TZ"
+    echo "System timezone updated: $current_timezone -> $TZ"
+fi
+echo ""
+
 if [ -z "${HOMELAB_SETUP_MODULES:-}" ] && [ -z "${HOMELAB_SERVICES:-}" ]; then
     echo "WARNING: No modules or services configured, nothing to do"
     exit 0
