@@ -1,6 +1,7 @@
 #!/bin/bash
-# Pre-deploy hook for the ai stack: log the Docker host into the private Forgejo OCI
-# registry before `docker compose pull` fetches our athena-mcp image.
+# Pre-deploy hook for the ai stack: ensure local model artifacts are verified,
+# then log the Docker host into the private Forgejo OCI registry before
+# `docker compose pull` fetches our athena-mcp image.
 #
 # The login lives here rather than in a setup module because the registry is reached at
 # the Forgejo FQDN through the reverse proxy (dns -> reverse-proxy -> forgejo, all
@@ -13,6 +14,7 @@ set -euo pipefail
 
 CONFIG_DIR="${CONFIG_DIR:?CONFIG_DIR not set}"
 ENV_FILE="${ENV_FILE:?ENV_FILE not set}"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # source_env only exports CONFIG_DIR/ENV_FILE, so re-source the env for the creds
 # (same pattern as services/radicale/pre-up.sh).
@@ -26,6 +28,17 @@ set +a
 : "${CONTAINER_REGISTRY:?CONTAINER_REGISTRY not set}"
 : "${CONTAINER_REGISTRY_USER:?CONTAINER_REGISTRY_USER not set}"
 : "${CONTAINER_REGISTRY_TOKEN:?CONTAINER_REGISTRY_TOKEN not set}"
+: "${LLAMA_MODELS_ROOT:?LLAMA_MODELS_ROOT not set}"
+: "${LLAMA_SWAP_NVIDIA_VISIBLE_DEVICES:?LLAMA_SWAP_NVIDIA_VISIBLE_DEVICES not set}"
+: "${LLAMA_ATHENA_GPU:?LLAMA_ATHENA_GPU not set}"
+: "${LLAMA_UTILITY_GPU:?LLAMA_UTILITY_GPU not set}"
+
+if [ ! -f "$CONFIG_DIR/llama-swap/config.yml" ]; then
+    echo "ERROR: llama-swap config not found: $CONFIG_DIR/llama-swap/config.yml" >&2
+    exit 1
+fi
+
+bash "$SCRIPT_DIR/download-models.sh"
 
 if ! command -v docker &> /dev/null; then
     echo "  ERROR: docker not found — ai pre-up needs the docker CLI" >&2

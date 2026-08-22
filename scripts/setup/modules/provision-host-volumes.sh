@@ -2,16 +2,16 @@
 # Module: provision-host-volumes (Proxmox host only)
 #
 # Creates dedicated LVM-thin volumes on the host and mounts them, ready to be
-# bind-mounted into an LXC via a _MP* entry (e.g. a faster store for the Ollama
+# bind-mounted into an LXC via a _MP* entry (e.g. a faster store for the local AI
 # model dir). Must run BEFORE create-lxcs so the mountpoint exists for the bind.
 #
 # Each volume is defined by a prefix in HOMELAB_HOST_VOLUMES (space-separated),
-# mirroring the HOMELAB_LXCS / HOMELAB_VMS pattern. For prefix "OLLAMA_SSD":
-#   OLLAMA_SSD_LV_NAME      logical volume name (created in the thin pool)
-#   OLLAMA_SSD_SIZE_GIB     virtual size in GiB (thin: backs only what's written)
-#   OLLAMA_SSD_MOUNTPOINT   absolute host path to mount it at
-#   OLLAMA_SSD_THINPOOL     optional, thin pool (default: pve/data)
-#   OLLAMA_SSD_FS           optional, filesystem type (default: ext4)
+# mirroring the HOMELAB_LXCS / HOMELAB_VMS pattern. For prefix "AI_MODELS_SSD":
+#   AI_MODELS_SSD_LV_NAME      logical volume name (created in the thin pool)
+#   AI_MODELS_SSD_SIZE_GIB     virtual size in GiB (thin: backs only what's written)
+#   AI_MODELS_SSD_MOUNTPOINT   absolute host path to mount it at
+#   AI_MODELS_SSD_THINPOOL     optional, thin pool (default: pve/data)
+#   AI_MODELS_SSD_FS           optional, filesystem type (default: ext4)
 #
 # Idempotent + data-safe: LV created only if absent; mkfs runs only when the
 # volume has no filesystem (never reformats data); fstab appended only if missing;

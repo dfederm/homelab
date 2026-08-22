@@ -35,7 +35,7 @@ All data lives on a ZFS pool and is bind-mounted into containers. The LXC root f
 │       ├── setup.sh       # Main setup runner (see below)
 │       └── modules/       # Idempotent setup modules
 └── services/              # Docker Compose service definitions
-    ├── ai/               # Ollama + LiteLLM + Open WebUI + SearXNG + Athena MCP
+    ├── ai/               # llama-swap + LiteLLM + Open WebUI + SearXNG + Athena MCP
     ├── authelia/          # Single sign-on / OIDC identity provider
     ├── backup/            # Rclone cloud backup
     ├── bedrock-connect/   # Console server-list menu (BedrockConnect) for Minecraft
@@ -116,7 +116,7 @@ Modules are standalone, idempotent scripts in `scripts/setup/modules/`. Each han
 | `install-nvidia-container-toolkit` | Install the userspace NVIDIA driver (matching the host's `NVIDIA_DRIVER_VERSION`) plus the NVIDIA Container Toolkit, so Docker containers can use GPUs passed into the LXC | Docker LXC |
 | `install-samba` | Install Samba, generate smb.conf from env vars | NAS LXC |
 | `install-tools` | Install common utilities (git, jq, htop, curl) | All machines |
-| `provision-host-volumes` | Carve dedicated LVM-thin volumes out of the boot SSD's thin pool and mount them (`HOMELAB_HOST_VOLUMES`), e.g. a fast-NVMe Ollama model store bind-mounted into the Docker LXC | Proxmox host |
+| `provision-host-volumes` | Carve dedicated LVM-thin volumes out of the boot SSD's thin pool and mount them (`HOMELAB_HOST_VOLUMES`), e.g. a fast-NVMe AI model store bind-mounted into the Docker LXC | Proxmox host |
 | `set-share-permissions` | Apply POSIX ACLs on file share directories | NAS LXC |
 
 ### Cascade
@@ -131,7 +131,7 @@ setup.sh on Proxmox host
   → configure-ups-monitoring (NUT telemetry + UPS health alerting)
   → configure-lxc-fstrim (periodic thin-pool reclaim for LXC rootfs)
   → configure-nvidia-driver (NVIDIA driver + device nodes)
-  → provision-host-volumes (dedicated fast-NVMe volumes, e.g. the Ollama model store)
+  → provision-host-volumes (dedicated fast-NVMe volumes, e.g. the AI model store)
   → create-lxcs
     → creates Docker LXC (GPU passthrough if _GPU=1, NVIDIA if _NVIDIA_GPU=1), then runs setup.sh inside it
       → create-users, install-tools, configure-ssh, install-docker, configure-macvlan-bridge,
@@ -428,7 +428,7 @@ surfaces sit behind 2FA. It integrates two ways:
 - **forward-auth** — Caddy can gate a browser-only web UI (e.g. an admin dashboard) by delegating
   the auth decision to Authelia.
 
-**[Open WebUI](#ai-ollama--litellm--open-webui) is wired via OIDC**, keeping its local
+**[Open WebUI](#ai-llama-swap--litellm--open-webui) is wired via OIDC**, keeping its local
 login as break-glass. Some services deliberately stay on their **own** auth because SSO breaks their
 native clients — Jellyfin (TV/mobile apps), Home Assistant (companion app), Radicale (CalDAV Basic
 auth) — which also makes them accidental break-glass access if Authelia is down.
@@ -448,46 +448,72 @@ already resolves the host, so only the Caddy site block is needed. Deploy by add
 pair) and the reusable per-app OIDC / forward-auth recipes are documented in
 [`services/authelia/README.md`](services/authelia/README.md).**
 
-### AI (Ollama + LiteLLM + Open WebUI)
+### AI (llama-swap + LiteLLM + Open WebUI)
 
-`services/ai/` runs the family AI stack as a single compose project on the shared internal
-`ai` Docker network: [Ollama](https://ollama.com) for local LLM serving,
-[LiteLLM](https://www.litellm.ai/) for authenticated OpenAI-compatible routing and usage
-accounting, and [Open WebUI](https://openwebui.com) as the multi-user chat frontend.
+`services/ai/` runs the family AI stack as one Compose project on the shared internal `ai` network:
+[llama-swap](https://github.com/mostlygeek/llama-swap) owns model-specific `llama-server`
+processes, [LiteLLM](https://www.litellm.ai/) provides authenticated workload aliases and usage
+accounting, and [Open WebUI](https://openwebui.com) is the multi-user chat frontend.
 
-Ollama serves on the CPU by default. On a machine with NVIDIA GPUs it can use them
-instead, which is a per-machine env-file decision rather than a compose change: set
-`OLLAMA_RUNTIME=nvidia` and `OLLAMA_NVIDIA_VISIBLE_DEVICES=all` (or a comma-separated index
-list, to leave some cards for another workload). That requires the GPUs to have reached
-Docker first — on a Proxmox host that means `configure-nvidia-driver` on the hypervisor,
-`_NVIDIA_GPU=1` on the LXC, and `install-nvidia-container-toolkit` inside it. Those are all
-setup modules, which `setup.sh` runs before deploying any service, so a rebuilt machine
-wires itself up in the right order. Setting the runtime without the toolkit in place fails
-the container at start rather than falling back to CPU — deliberately, since a GPU-sized
-model quietly running on the CPU is far more expensive to notice than a failed deploy.
-`OLLAMA_MAX_LOADED_MODELS` / `OLLAMA_NUM_PARALLEL` / `OLLAMA_CONTEXT_LENGTH` are tuned for
-CPU serving and are worth revisiting once weights live in VRAM.
+llama-swap is the only model lifecycle owner. Its operator-owned configuration lives outside this
+public repository at `${CONFIG_DIR}/llama-swap/config.yml`, on the NAS-backed config dataset. It
+launches three pinned profiles:
 
-Ollama's data dir (pulled models + cache) is bind-mounted to `/root/.ollama` from
-`OLLAMA_MODELS_ROOT` so models survive container recreation. Point it at a faster
-store — e.g. an NVMe-backed volume carved by `provision-host-volumes` and bind-mounted
-into the Docker LXC via a `_MP*` entry — to speed up cold model loads (and let you relax
-`OLLAMA_KEEP_ALIVE`). Leave it blank to fall back to the ZFS-backed
-`${DOCKER_APPDATA_ROOT}/ollama`. Ollama has **no authentication**, so it is never placed
-behind the public reverse proxy — it is reachable only on the internal `ai` network (Open
-WebUI reaches it at `http://ollama:11434`) and, via `OLLAMA_HTTP_PORT`, on the LAN.
+| Internal model ID | Purpose | Placement |
+|---|---|---|
+| `qwen3.6-27b` | Athena/family chat, Q4_K_M, non-thinking, 64K, q8 KV, temperature 0.5/top-p 0.8, one request slot | `LLAMA_ATHENA_GPU` |
+| `qwen2.5-7b` | Open WebUI title/tag/query generation, native 32K context | `LLAMA_UTILITY_GPU` |
+| `nomic-embed-text` | Open WebUI RAG embeddings | `LLAMA_UTILITY_GPU` |
 
-LiteLLM is the durable routing boundary between OpenAI-compatible clients and Ollama. Its model
-aliases and backend mappings are deliberately **not** committed to this repository. They live in the
-ZFS-backed `${CONFIG_DIR}/litellm/config.yaml`, mounted read-only into the gateway. This keeps
-workload names and model choices operational configuration: aliases can be added or remapped without
-a repository change, while callers remain independent of Ollama model tags.
+Use stable GPU UUIDs for `LLAMA_ATHENA_GPU` and `LLAMA_UTILITY_GPU`.
+`LLAMA_SWAP_NVIDIA_VISIBLE_DEVICES` controls which devices Docker exposes, while each child process
+receives only its assigned device. The matrix permits all three profiles to coexist because the
+large model and utility models occupy different cards. llama-swap has no authentication and
+publishes no host port; only LiteLLM can reach it over the internal network. A missing NVIDIA
+runtime or required GPU setting fails deployment rather than silently serving on the CPU.
 
-Repository scripts do not parse, validate, or rewrite the operator-owned YAML. Keep every backend on
-`ollama_chat/...` at `http://ollama:11434`, omit callbacks and fallback routing, and retain the
-privacy/database settings described below. Declaring a profile does not pull its backend model —
-ensure each selected model is already present through `OLLAMA_PULL_MODELS` or an approved manual
-pull.
+Model files live under `LLAMA_MODELS_ROOT`, normally a fast volume bind-mounted into the Docker LXC.
+`services/ai/models.txt` pins each public artifact by immutable repository revision and SHA-256.
+Before every AI deployment, `download-models.sh` verifies existing files and downloads only missing
+or corrupt artifacts. Downloads resume from a `.partial` file and are atomically renamed only after
+the checksum passes.
+
+LiteLLM is the durable routing boundary between clients and llama-swap. Its model aliases and backend
+mappings are deliberately **not** committed to this repository. They live in the ZFS-backed
+`${CONFIG_DIR}/litellm/config.yaml`, mounted read-only into the gateway. This keeps workload names
+operational: callers continue requesting `family-interactive`, `family-utility`, and
+`family-embedding` while the internal model IDs remain replaceable.
+
+Repository scripts do not rewrite the operator-owned YAML. Configure the backends as:
+
+```yaml
+model_list:
+  - model_name: family-interactive
+    litellm_params:
+      model: openai/qwen3.6-27b
+      api_base: http://llama-swap:8080/v1
+      api_key: none
+  - model_name: family-background
+    litellm_params:
+      model: openai/qwen3.6-27b
+      api_base: http://llama-swap:8080/v1
+      api_key: none
+  - model_name: family-utility
+    litellm_params:
+      model: openai/qwen2.5-7b
+      api_base: http://llama-swap:8080/v1
+      api_key: none
+  - model_name: family-embedding
+    litellm_params:
+      model: openai/nomic-embed-text
+      api_base: http://llama-swap:8080/v1
+      api_key: none
+```
+
+Keep `litellm_settings.turn_off_message_logging: true`; keep the existing database-backed
+`general_settings`; and do not configure external callbacks or fallback providers. Coding aliases
+remain reserved for a separately qualified coding profile and should not be advertised until that
+backend exists.
 
 LiteLLM publishes `${LITELLM_HTTP_PORT}:4000` for authenticated LAN clients and has no Caddy route.
 Its PostgreSQL state persists under `${DOCKER_APPDATA_ROOT}/litellm/db`. The `ai` post-up hook
@@ -499,7 +525,7 @@ a client. Generate the master key, immutable salt, and each client key independe
 followed by random data.
 
 Open WebUI **does** have its own multi-user auth (the first account created becomes the
-admin), so unlike Ollama it is exposed via Caddy at `OPEN_WEBUI_FQDN`. It is also reachable
+admin), so it is exposed via Caddy at `OPEN_WEBUI_FQDN`. It is also reachable
 on the LAN at `http://<docker-host-ip>:${OPEN_WEBUI_HTTP_PORT}`. Its SQLite DB + ChromaDB
 (per-user chats, settings, RAG vectors) persist on `${DOCKER_APPDATA_ROOT}/open-webui`
 (ZFS-backed).
@@ -521,14 +547,10 @@ First-run setup notes:
   access) until approved.
 - Switch tool calling to **Native** mode (the prompt-injection "Default" mode is deprecated)
   per model that needs tools.
-- **Chat runs through LiteLLM over Open WebUI's OpenAI-compatible connection, not its native Ollama
-  one.** The OpenAI path preserves multiple tool calls that Open WebUI's Ollama middleware mangles;
-  LiteLLM still routes the request only to the same local Ollama server. Keep the base URL fixed at
-  `http://litellm:4000/v1` and select one of the profiles allowed by
-  `LITELLM_OPEN_WEBUI_MODELS`. The native Ollama connection remains enabled for RAG embeddings and
-  model management. Because the OpenAI protocol has no per-request context field, a model's
-  `num_ctx` set in the Open WebUI UI is ignored on this path — the context window comes from
-  Ollama's `OLLAMA_CONTEXT_LENGTH` instead.
+- **All model traffic runs through LiteLLM over Open WebUI's OpenAI-compatible clients.** Keep the
+  chat and RAG base URLs fixed at `http://litellm:4000/v1`, disable the native Ollama API, and select
+  only profiles allowed by `LITELLM_OPEN_WEBUI_MODELS`. The 64K Athena context is fixed in the
+  llama-server profile rather than configured per Open WebUI model.
 - On a **fresh** Open WebUI database, Compose seeds the LiteLLM URL, its dedicated key, and the
   `x-litellm-end-user-id: {{USER_ID}}` connection header. That connection also blanks
   `X-OpenWebUI-User-Jwt` and all `X-OpenWebUI-User-{Name,Id,Email,Role}` headers so the global Athena
@@ -536,29 +558,14 @@ First-run setup notes:
   **existing** instance these are PersistentConfig: add all those custom headers in Admin Settings
   → Connections with the same URL and key. Open WebUI substitutes the authenticated user's opaque,
   stable internal ID server-side; do not substitute a name or email.
-- `OPEN_WEBUI_TASK_MODEL` seeds a small/fast task model (e.g. `qwen2.5:7b`) for
-  native-Ollama title/tag/query generation; `OPEN_WEBUI_TASK_MODEL_EXTERNAL` selects the configured
-  LiteLLM profile for the same work. These are first-launch-seeded PersistentConfig values under
-  Admin Settings → Interface. If the applicable model does not resolve, background tasks run on the
-  large chat model. That evicts the conversation's cached prompt prefix and can make the next
-  CPU-served turn re-prefill the whole context. Both task model IDs must also be readable by
-  non-admin users under Admin Settings → Models.
-- `OPEN_WEBUI_RAG_EMBEDDING_MODEL` (e.g. `nomic-embed-text`) is used via the local Ollama
-  for RAG embeddings instead of Open WebUI's bundled embedder.
-
-Models are **pulled declaratively**: the `ollama-pull` container pulls everything in
-`OLLAMA_PULL_MODELS` (set per machine in the env file; `.env.template` documents the
-recommended set) on each deploy, once the server is healthy, then exits. This is
-idempotent — already-present models are skipped. Large pulls run in the background; follow
-progress with:
-```bash
-docker logs -f ollama-pull
-```
-To pull an extra model ad-hoc: `docker exec ollama ollama pull <model>`.
-
-Qwen3.6 models are hybrid-thinking: pulling a model does not select a reasoning mode. For
-non-thinking chats over an OpenAI-compatible connection, set the Open WebUI model's
-**Reasoning Effort** advanced parameter to `none`.
+- `OPEN_WEBUI_TASK_MODEL_EXTERNAL=family-utility` keeps title/tag/query generation on the small
+  model. `TASK_MODEL` is intentionally empty because the native model API is disabled. The external
+  task model must be readable by non-admin users under Admin Settings → Models.
+- `OPEN_WEBUI_RAG_EMBEDDING_MODEL=family-embedding` uses the dedicated embedding profile through
+  LiteLLM. Set Documents → Embedding Engine to `OpenAI`, the URL to
+  `http://litellm:4000/v1`, and the key to `LITELLM_OPEN_WEBUI_API_KEY` on an existing instance.
+- Qwen3.6 is hybrid-thinking, but the server profile defaults to non-thinking. Keep Open WebUI's
+  Reasoning Effort at `none` for the Athena model.
 
 #### LiteLLM operations, privacy, and rollout
 
@@ -575,45 +582,27 @@ instead of prompt and completion bodies, and `turn_off_message_logging: true` ke
 proxy logs. Do not enable prompt logging or external callbacks. Names and email addresses remain in
 Open WebUI and are not copied into LiteLLM.
 
-Deploy this seam during a low-use window:
+Deploy the stack as follows:
 
-1. Create `${CONFIG_DIR}/litellm/config.yaml` on the ZFS-backed config dataset. Define the desired
-   `model_list` there with literal `ollama_chat/...` backends and `api_base: http://ollama:11434`.
-   Set `litellm_settings.turn_off_message_logging: true`, and under `general_settings` set
-   `master_key: os.environ/LITELLM_MASTER_KEY`, `database_url: os.environ/DATABASE_URL`,
-   `store_model_in_db: false`, and `store_prompts_in_spend_logs: false`. Do not configure callbacks
-   or fallbacks.
-2. Put all `LITELLM_*` values documented in `.env.template` in the Docker LXC's external env file.
-   For each `LITELLM_CLIENTS` prefix, make its `_MODELS` values match aliases in the external YAML.
-   Keep `LITELLM_SALT_KEY` unchanged for the lifetime of the database. If a client prefix or key
-   alias is removed or renamed later, delete the old alias in the LiteLLM Admin UI; reconciliation
-   only manages aliases currently listed in `LITELLM_CLIENTS`.
-3. Inside the Docker LXC, deploy `ai`. After the gateway is healthy, the post-up hook creates or
-   updates the configured keys.
-4. With the master key, confirm the LiteLLM model list matches the external config. With each virtual
-   key, confirm its model list and allowlist before migrating a caller.
-5. Validate the initial interactive coding client first with its own key and configured profile; do
-   not give it the master or Open WebUI key. Keep its prior endpoint/model configuration available
-   and restore it immediately if listing, streaming, or inference fails.
-6. Before moving family use, retain the existing direct-Ollama OpenAI connection. On a fresh Open
-   WebUI database, where Compose seeds only LiteLLM, add a separate direct-Ollama OpenAI connection
-   as the rollback path. For an existing database, add a separate LiteLLM connection with the
-   `LITELLM_OPEN_WEBUI_API_KEY` and all custom headers described above; do not replace the direct
-   connection.
-7. Select an allowed interactive profile and verify model listing, streaming, non-thinking controls,
-   the configured external task profile, multiple/parallel Athena tool calls, Athena's signed user
-   identity, and distinct opaque end-user IDs in LiteLLM usage.
-8. Only after those checks pass, point normal family chats at the LiteLLM connection.
+1. Create `${CONFIG_DIR}/llama-swap/config.yml` with the model commands, placement env references,
+   and routing matrix described above.
+2. Set `LLAMA_MODELS_ROOT`, `LLAMA_SWAP_NVIDIA_VISIBLE_DEVICES`, `LLAMA_ATHENA_GPU`, and
+   `LLAMA_UTILITY_GPU` in the Docker LXC's external env file. Add `family-embedding` to
+   `LITELLM_OPEN_WEBUI_MODELS`.
+3. Replace the external LiteLLM mappings with the `openai/...` entries above. Keep
+   `LITELLM_SALT_KEY` unchanged for the lifetime of the database.
+4. Deploy `ai`. The pre-up hook validates the external llama-swap config and verifies/downloads the
+   model files; after LiteLLM is healthy, the
+   post-up hook creates or updates the configured client keys.
+5. On an existing Open WebUI instance, update the persisted Connections, Interface, and Documents
+   settings described above; Compose env values only seed a fresh database.
+6. Verify model listing, streaming, non-thinking behavior, the external task profile, embeddings,
+   multiple/parallel Athena tool calls, signed user identity, and distinct opaque user IDs in
+   LiteLLM usage.
 
-If any Open WebUI compatibility or identity check fails, switch chats back to the retained
-direct-Ollama OpenAI connection. If the coding client fails, restore its prior endpoint and model.
-Repository rollback is the prior repository revision, but Open WebUI connection values are
-PersistentConfig and must also be restored in Admin Settings; a Git/Compose revert does not
-overwrite them. The external LiteLLM YAML is outside Git, so copy it to a verified sibling backup
-before each change and restore that copy separately when rolling back. Leave
-`${DOCKER_APPDATA_ROOT}/litellm/db` intact so keys and accounting remain recoverable. Do not delete
-the database directory or rotate the salt as part of rollback. Existing direct Ollama callers are
-otherwise unaffected.
+Rollback is intentionally simple for this currently unused service: restore the prior repository
+revision and external settings, redeploy, and re-download old model data if it has already been
+removed. Do not delete or recreate LiteLLM's database, and never rotate its salt as part of rollback.
 
 Open WebUI's native **web search** is disabled; Athena MCP exposes bounded `web_search` and protected
 `fetch_url` tools instead. SearXNG remains the private backend for Athena's search tool.
@@ -623,7 +612,7 @@ Open WebUI's native **web search** is disabled; Athena MCP exposes bounded `web_
 The `services/ai/` stack also runs [SearXNG](https://docs.searxng.org), a self-hosted
 metasearch engine, as the homelab's **private web-search backend**. It backs Athena MCP's
 `web_search` tool without relying on Open WebUI's scraping-based, rate-limit-prone DuckDuckGo
-backend. SearXNG is a backend, not a family-facing UI — it has **no auth**, so like Ollama it is
+backend. SearXNG is a backend, not a family-facing UI — it has **no auth**, so it
 never placed behind the public reverse proxy. It publishes no host port: consumers reach it over
 the shared `ai` Docker network at `http://searxng:8080`.
 
@@ -649,7 +638,7 @@ fetching their pages; `fetch_url` separately retrieves bounded text from one sel
 page while blocking private-network destinations, automatic or unvalidated redirects, compressed
 bodies, scripts, and subresources.
 
-Like Ollama and SearXNG it has **no auth**, so it is never placed behind the public reverse proxy: it
+Like SearXNG it has **no auth**, so it is never placed behind the public reverse proxy: it
 publishes no host port and is reachable only over the shared `ai` Docker network at
 `http://athena-mcp:8080`. It deploys as part of the `ai` service — no separate `HOMELAB_SERVICES`
 entry is needed.

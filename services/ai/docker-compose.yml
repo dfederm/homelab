@@ -1,93 +1,33 @@
-# The family AI stack, sharing the internal `ai` network: Ollama (local LLM serving), Open
-# WebUI (chat frontend, reaches Ollama at http://ollama:11434), SearXNG (private web-search
-# backend for Open WebUI and Athena MCP, reached at http://searxng:8080), and Athena MCP
-# (family tools including protected public-web access, reached at http://athena-mcp:8080).
-# None of Ollama, SearXNG, or Athena MCP has authentication, so none is ever placed behind the
-# public reverse proxy — they are reachable only on the internal `ai` network and the LAN. Open
-# WebUI has its own multi-user auth and is exposed publicly via Caddy (the site block lives in
-# services/reverse-proxy/Caddyfile). Because it is internet-facing from first boot, claim the
-# admin account promptly on a fresh deploy (the first account to register becomes admin).
+# The family AI stack, sharing the internal `ai` network: llama-swap (the lifecycle owner for
+# model-specific llama-server processes), LiteLLM (the authenticated routing boundary), Open
+# WebUI, SearXNG, and Athena MCP. The unauthenticated backends stay internal; only LiteLLM's
+# authenticated port is published to the LAN, and only Open WebUI is exposed through Caddy.
 services:
-  ollama:
-    container_name: ollama
-    image: ollama/ollama:0.32.13@sha256:77f1a2a54460f0380f2611e1464233d9b82cb6e58afc8f60abec0061049d2d82
+  llama-swap:
+    container_name: llama-swap
+    image: ghcr.io/mostlygeek/llama-swap:unified-cuda-2026-08-20@sha256:668d8659b7a2f6f605abbffc54642addaa1660c615cd0a1cd45ae595fe860fdd
     restart: unless-stopped
-    # GPU access, off unless the machine's env file turns it on. A host with
-    # NVIDIA GPUs sets OLLAMA_RUNTIME=nvidia and OLLAMA_NVIDIA_VISIBLE_DEVICES=all,
-    # and the NVIDIA container toolkit injects the driver and device nodes at
-    # start. The defaults below are the stock runtime with no devices, so a
-    # CPU-only host — or a GPU host whose driver isn't up yet — serves on the CPU.
-    runtime: ${OLLAMA_RUNTIME:-runc}
+    runtime: nvidia
     environment:
       - TZ=${TZ}
-      # Empty means "no GPUs", which is what makes the default safe.
-      - NVIDIA_VISIBLE_DEVICES=${OLLAMA_NVIDIA_VISIBLE_DEVICES:-}
-      # Inference needs CUDA (compute) and nvidia-smi (utility); no graphics.
+      - NVIDIA_VISIBLE_DEVICES=${LLAMA_SWAP_NVIDIA_VISIBLE_DEVICES:?LLAMA_SWAP_NVIDIA_VISIBLE_DEVICES not set}
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
-      - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE}
-      # Optional clamps, both normally left blank. Ollama already admits models by available memory
-      # and evicts (LRU) to make room; blank lets it auto-size the resident-model cap to 3 per GPU,
-      # and concurrent requests per model to 1. The model count is a SEPARATE, earlier gate than the
-      # memory check, so setting it too low evicts models that would have fit — a chat + task +
-      # embedding trio well inside VRAM still thrashes at 2.
-      # ⚠️ Worth clamping the model count in one case: on a CPU-only host in a container, Ollama
-      # sizes system RAM from the hypervisor rather than the container's limit, so its memory gate
-      # over-admits. VRAM on a GPU host is read accurately and needs no clamp.
-      - OLLAMA_MAX_LOADED_MODELS=${OLLAMA_MAX_LOADED_MODELS}
-      - OLLAMA_NUM_PARALLEL=${OLLAMA_NUM_PARALLEL}
-      # Server-side default context window. This is load-bearing, not a tuning knob: Open WebUI
-      # talks to the OpenAI-compatible /v1 endpoint (see the open-webui service below), and the
-      # OpenAI protocol has no per-request context field — a model's num_ctx set in the Open WebUI
-      # UI is silently dropped. Without this, every request falls back to Ollama's 4096 default,
-      # and a tool-enabled model overflows it on the system prompt + tool schemas alone
-      # ("request exceeds the available context size"). Applies to every model Ollama loads, so it
-      # costs KV-cache RAM per resident model; weigh against OLLAMA_MAX_LOADED_MODELS.
-      - OLLAMA_CONTEXT_LENGTH=${OLLAMA_CONTEXT_LENGTH:-32768}
+      - LLAMA_ATHENA_GPU=${LLAMA_ATHENA_GPU}
+      - LLAMA_UTILITY_GPU=${LLAMA_UTILITY_GPU}
     volumes:
-      # Ollama data dir (models + cache). Point OLLAMA_MODELS_ROOT at a faster store
-      # (e.g. NVMe) to speed model loads; falls back to the ZFS-backed appdata dir.
-      - ${OLLAMA_MODELS_ROOT:-${DOCKER_APPDATA_ROOT}/ollama}:/root/.ollama
-    ports:
-      - '${OLLAMA_HTTP_PORT}:11434'
+      - ${LLAMA_MODELS_ROOT}:/models:ro
+      - ${CONFIG_DIR}/llama-swap/config.yml:/etc/llama-swap/config/config.yaml:ro
     networks:
       - ai
     healthcheck:
-      test: ['CMD', 'ollama', 'ls']
+      test: ['CMD', 'curl', '--fail', 'http://localhost:8080/health']
       interval: 30s
       timeout: 5s
-      retries: 3
+      retries: 5
       start_period: 10s
 
-  # Declaratively ensures the configured models are present. Runs once each deploy after
-  # the server is healthy, then exits. `ollama pull` is idempotent (already-present models
-  # are skipped) and runs server-side, so this is a thin API client — no volume needed.
-  # A large model download continues in the background; follow it with
-  # `docker logs -f ollama-pull`.
-  ollama-pull:
-    container_name: ollama-pull
-    image: ollama/ollama:0.32.13@sha256:77f1a2a54460f0380f2611e1464233d9b82cb6e58afc8f60abec0061049d2d82
-    depends_on:
-      ollama:
-        condition: service_healthy
-    environment:
-      - OLLAMA_HOST=ollama:11434
-      - OLLAMA_PULL_MODELS=${OLLAMA_PULL_MODELS}
-    networks:
-      - ai
-    entrypoint: ['/bin/sh', '-c']
-    command:
-      - |
-        set -eu
-        echo "Ensuring models present: $$OLLAMA_PULL_MODELS"
-        for model in $$OLLAMA_PULL_MODELS; do
-          echo "==> ollama pull $$model"
-          ollama pull "$$model"
-        done
-        echo "All requested models are present."
-    restart: 'no'
-
   # Internal OpenAI-compatible routing seam. Stable workload names keep callers independent of
-  # backend model IDs while dedicated virtual keys provide durable per-client usage attribution.
+  # llama-server model IDs while dedicated virtual keys provide durable per-client usage attribution.
   # The API and Admin UI share one authenticated port, published only to the LAN; there is no Caddy
   # route. Configuration stays authoritative in ZFS-backed external YAML rather than the database.
   litellm:
@@ -96,7 +36,7 @@ services:
     restart: unless-stopped
     command: ['--config=/app/config.yaml', '--port=4000']
     depends_on:
-      ollama:
+      llama-swap:
         condition: service_healthy
       litellm-db:
         condition: service_healthy
@@ -146,13 +86,13 @@ services:
       retries: 5
       start_period: 30s
 
-  # Multi-user chat / agent frontend in front of LiteLLM. LiteLLM then reaches Ollama over the
+  # Multi-user chat / agent frontend in front of LiteLLM. LiteLLM then reaches llama-swap over the
   # internal `ai` network. Open WebUI has its own auth (first account
   # created becomes the admin); it is reachable on the LAN via the published port and exposed
   # publicly via Caddy (site block in services/reverse-proxy/Caddyfile).
   # Its SQLite DB + ChromaDB (per-user chats, settings, RAG vectors) persist on ZFS-backed
   # appdata so they survive container recreation.
-  # NOTE: many of these env vars (OLLAMA_BASE_URL, WEBUI_URL, ENABLE_OPENAI_API,
+  # NOTE: many of these env vars (ENABLE_OLLAMA_API, WEBUI_URL, ENABLE_OPENAI_API,
   # OPENAI_API_BASE_URL, OPENAI_API_KEY, ENABLE_SIGNUP, DEFAULT_USER_ROLE, TASK_MODEL*,
   # RAG_EMBEDDING_*) are "PersistentConfig" — read on first launch then stored in the DB. After the
   # first deploy they are managed in the UI/DB, so changing them here later has no effect unless the
@@ -164,18 +104,16 @@ services:
     image: ghcr.io/open-webui/open-webui:v0.11.0@sha256:72c0ba641ba75e7aa52655cb242570906ececd09b1140fb736483038a22b3228
     restart: unless-stopped
     depends_on:
-      ollama:
-        condition: service_healthy
       litellm:
         condition: service_healthy
     environment:
       - TZ=${TZ}
-      - OLLAMA_BASE_URL=http://ollama:11434
+      - ENABLE_OLLAMA_API=false
       # Public URL, used for share links / OAuth redirects / notifications.
       - WEBUI_URL=https://${OPEN_WEBUI_FQDN}
       # Chat traffic goes through Open WebUI's OpenAI-compatible client, pointed at LiteLLM's
-      # internal endpoint. LiteLLM exposes stable profile names and remains backed only by Ollama.
-      # Reason: Open WebUI's Ollama-specific middleware mangles a turn that returns MULTIPLE tool
+      # internal endpoint. LiteLLM exposes stable profile names backed by llama-swap.
+      # Open WebUI's legacy native-model middleware mangles a turn that returns MULTIPLE tool
       # calls (it concatenates them into one malformed call), which makes athena-mcp error out and
       # the chat hang. Its OpenAI code path handles multi-tool turns correctly. Same server, same
       # model — just the working handler.
@@ -190,12 +128,6 @@ services:
       # only the opaque, server-substituted Open WebUI user id for per-member usage reporting. Trust
       # it only together with the dedicated open-webui virtual key.
       - 'OPENAI_API_CONFIGS={"0":{"headers":{"X-OpenWebUI-User-Jwt":"","X-OpenWebUI-User-Name":"","X-OpenWebUI-User-Id":"","X-OpenWebUI-User-Email":"","X-OpenWebUI-User-Role":"","x-litellm-end-user-id":"{{USER_ID}}"}}}'
-      # The native Ollama connection stays enabled: RAG_EMBEDDING_ENGINE=ollama below uses it for
-      # embeddings (a separate code path, unaffected by the tool-call bug), and it keeps the model
-      # list/pull management in the UI working. Chat is what moves to the OpenAI connection.
-      # It also keeps the task model reachable under an unprefixed id (see TASK_MODEL below):
-      # disabling this connection, or giving it a prefix, can silently change which model Open WebUI
-      # picks for background tasks.
       # Family instance: no public self-registration — the admin provisions each account
       # (Admin Settings -> Users -> Add User). NOTE: the very first account to register still
       # becomes the admin (initial-admin signup intentionally bypasses this flag), so create
@@ -206,23 +138,14 @@ services:
       - DEFAULT_USER_ROLE=pending
       # Use the small/fast model for background tasks (title/tag/query generation) so the large chat
       # model isn't burned on trivia.
-      # Open WebUI picks the task model by the chat model's connection type: TASK_MODEL is the native
-      # Ollama model id, while TASK_MODEL_EXTERNAL is an externally configured LiteLLM profile. If
-      # the applicable one does not resolve, background tasks fall back to the chat model itself,
-      # which is expensive well beyond
-      # the wasted tokens: Ollama serves one KV cache slot per model (OLLAMA_NUM_PARALLEL), so a
-      # background task on the chat model evicts the conversation's cached prompt prefix and the
-      # user's next turn re-prefills the whole context — minutes on CPU inference.
-      # ⚠️ The native model must also be in OLLAMA_PULL_MODELS, and both task model ids must be
-      # readable by non-admin users (Admin Settings -> Models): background tasks run under the
-      # requesting user and are access-checked, but admins bypass that check, so a task model only an
-      # admin can read fails for everyone else silently, with no error in the UI.
-      - TASK_MODEL=${OPEN_WEBUI_TASK_MODEL}
+      # Background tasks and RAG use dedicated LiteLLM aliases so Open WebUI has no direct
+      # connection to the unauthenticated serving layer.
+      - TASK_MODEL=
       - TASK_MODEL_EXTERNAL=${OPEN_WEBUI_TASK_MODEL_EXTERNAL}
-      # Use the local Ollama embeddings model for RAG instead of Open WebUI's bundled
-      # default, so the pulled embeddings model (OPEN_WEBUI_RAG_EMBEDDING_MODEL) is actually used.
-      - RAG_EMBEDDING_ENGINE=ollama
+      - RAG_EMBEDDING_ENGINE=openai
       - RAG_EMBEDDING_MODEL=${OPEN_WEBUI_RAG_EMBEDDING_MODEL}
+      - RAG_OPENAI_API_BASE_URL=http://litellm:4000/v1
+      - RAG_OPENAI_API_KEY=${LITELLM_OPEN_WEBUI_API_KEY}
       # Athena MCP provides web tools, so Open WebUI's native web search is disabled.
       # This is PersistentConfig: existing instances must also disable it in the UI.
       - ENABLE_WEB_SEARCH=false
@@ -279,7 +202,7 @@ services:
 
   # Self-hosted SearXNG metasearch — the private web-search backend Open WebUI queries (see the
   # web-search env on open-webui above), and the backend for Athena MCP's web_search tool. It has
-  # no auth, so like Ollama it is never placed behind the public reverse proxy. It is an
+  # no auth, so it is never placed behind the public reverse proxy. It is an
   # internal-only backend: no host port is published — consumers reach it over the `ai` network at
   # http://searxng:8080.
   searxng:
@@ -319,17 +242,17 @@ services:
 
   # Athena MCP — family tools over Streamable HTTP, including homelab health, shopping lists,
   # calendars, contacts, media, photos, tasks, weather, and protected public-web search/fetch.
-  # Open WebUI's native MCP client consumes it at http://athena-mcp:8080. Like Ollama and SearXNG it
+  # Open WebUI's native MCP client consumes it at http://athena-mcp:8080. Like SearXNG it
   # has no auth, so it is never placed behind the public reverse proxy and publishes no host port —
   # the `ai` network + LAN is the trust boundary.
   # The image is our own, built + published by the athena-mcp repo's Forgejo CI (`dotnet publish
   # -t:PublishContainer`, no Dockerfile) to our Forgejo OCI registry. It is PRIVATE, so this stack's
   # pre-up hook logs the host in (`docker login`) before the pull (see the "Athena MCP" section in the README).
   # `${CONTAINER_REGISTRY}` keeps the registry host out of this public repo; the image name + digest
-  # stay in-repo (immutable, non-sensitive), pinning tag AND digest like the `forgejo`/`ollama` idiom.
+  # stay in-repo (immutable, non-sensitive), pinning tag AND digest like the other services.
   athena-mcp:
     container_name: athena-mcp
-    # Pinned by tag AND digest (like forgejo/ollama). Renovate can't reach this private registry, so
+    # Pinned by tag AND digest. Renovate can't reach this private registry, so
     # bump both by hand: get the newest tag from the athena-mcp CI publish job summary and the digest
     # from that build's registry manifest.
     image: ${CONTAINER_REGISTRY}/david/athena-mcp:0.1.37@sha256:1cb728717c217f38d452221a75e635d56df2f94ab821d94fbbaf0dabeac4a057

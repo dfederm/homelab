@@ -17,7 +17,7 @@
 # it clears the genuinely dangling leftovers of the locally-built webhook image.
 #
 # Safety: a container protects its image whether it is running or stopped, so the
-# one-shot containers that exit after a deploy (e.g. ollama-pull) keep theirs. An
+# one-shot containers that exit after a deploy keep theirs. An
 # image that is removed is always re-pullable - its digest is pinned in git - and a
 # service whose container happens to be absent just re-pulls on its next deploy.
 #
