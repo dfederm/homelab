@@ -1,4 +1,4 @@
-# Copilot Instructions — Homelab
+# Repository Instructions — Homelab
 
 ## What This Repo Is
 
