@@ -5,7 +5,6 @@ set -uo pipefail
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 COMPOSE="$REPO_DIR/services/ai/docker-compose.yml"
 DOWNLOADER="$REPO_DIR/services/ai/download-models.sh"
-MANIFEST="$REPO_DIR/services/ai/models.txt"
 ENV_TEMPLATE="$REPO_DIR/.env.template"
 FAILURES=0
 TMP_DIR=$(mktemp -d)
@@ -73,6 +72,15 @@ fi
 expect_line "$REPO_DIR/services/ai/pre-up.sh" \
     'if [ ! -f "$CONFIG_DIR/llama-swap/config.yml" ]; then' \
     "deployment requires the external llama-swap config"
+expect_line "$REPO_DIR/services/ai/pre-up.sh" \
+    'MODEL_MANIFEST="${LLAMA_MODEL_MANIFEST:-$CONFIG_DIR/ai/models.txt}"' \
+    "deployment uses the external model manifest"
+expect_line "$REPO_DIR/services/ai/pre-up.sh" \
+    'if [ ! -f "$MODEL_MANIFEST" ]; then' \
+    "deployment requires the external model manifest"
+expect_line "$DOWNLOADER" \
+    'MODEL_MANIFEST="${LLAMA_MODEL_MANIFEST:-${CONFIG_DIR:?CONFIG_DIR not set}/ai/models.txt}"' \
+    "standalone acquisition defaults to the external model manifest"
 
 if grep -Fq ': "${LLAMA_MODELS_ROOT:?' "$REPO_DIR/services/ai/pre-up.sh" \
     || grep -Fq ': "${LLAMA_SWAP_NVIDIA_VISIBLE_DEVICES:?' "$REPO_DIR/services/ai/pre-up.sh"; then
@@ -91,17 +99,6 @@ if grep -Fq 'LLAMA_ATHENA_GPU' "$COMPOSE" "$ENV_TEMPLATE" "$REPO_DIR/services/ai
 else
     pass "workload-specific GPU placement stays inside llama-swap config"
 fi
-
-if [ "$(grep -vc '^#' "$MANIFEST")" -eq 4 ] \
-    && ! grep -Ev '^(#|[A-Za-z0-9._/-]+\|[0-9a-f]{64}\|[1-9][0-9]*\|https://)' "$MANIFEST" > /dev/null; then
-    pass "model manifest pins four HTTPS artifacts by SHA-256 and size"
-else
-    fail "model manifest pins four HTTPS artifacts by SHA-256 and size"
-fi
-
-expect_line "$MANIFEST" \
-    "qwen3.8-27b/Qwen3.8-27B-UD-IQ4_XS.gguf|40fac4050e940397dbf13087afd50f4734a11805bf9d65ef8ddd7483470e6199|14252845984|https://huggingface.co/unsloth/Qwen3.8-27B-GGUF/resolve/4ca720788d1e01f1bff70c033e0d0028fd02e502/Qwen3.8-27B-UD-IQ4_XS.gguf" \
-    "Qwen3.8 acquisition is pinned to the verified immutable artifact"
 
 mkdir "$TMP_DIR/bin" "$TMP_DIR/models"
 printf 'test model payload\n' > "$TMP_DIR/source.gguf"

@@ -1,5 +1,0 @@
-# relative path|sha256|size in bytes|download URL
-qwen3.6-27b/Qwen3.6-27B-Q4_K_M.gguf|a7cbd3ecc0e3f9b333edee61ae66bc87ed713c5d49587a8355814722ed329e0f|17106773120|https://huggingface.co/unsloth/Qwen3.6-27B-MTP-GGUF/resolve/5cb35eb3dcbf52dbce5f87dbc64df6aaffadcace/Qwen3.6-27B-Q4_K_M.gguf
-qwen3.8-27b/Qwen3.8-27B-UD-IQ4_XS.gguf|40fac4050e940397dbf13087afd50f4734a11805bf9d65ef8ddd7483470e6199|14252845984|https://huggingface.co/unsloth/Qwen3.8-27B-GGUF/resolve/4ca720788d1e01f1bff70c033e0d0028fd02e502/Qwen3.8-27B-UD-IQ4_XS.gguf
-qwen2.5-7b/Qwen2.5-7B-Instruct-Q4_K_M.gguf|65b8fcd92af6b4fefa935c625d1ac27ea29dcb6ee14589c55a8f115ceaaa1423|4683074240|https://huggingface.co/bartowski/Qwen2.5-7B-Instruct-GGUF/resolve/8911e8a47f92bac19d6f5c64a2e2095bd2f7d031/Qwen2.5-7B-Instruct-Q4_K_M.gguf
-nomic-embed-text/nomic-embed-text-v1.5.f16.gguf|f7af6f66802f4df86eda10fe9bbcfc75c39562bed48ef6ace719a251cf1c2fdb|274290560|https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF/resolve/0188c9bf409793f810680a5a431e7b899c46104c/nomic-embed-text-v1.5.f16.gguf

@@ -465,10 +465,11 @@ reach it over the internal network. A missing NVIDIA runtime or container GPU se
 deployment rather than silently serving on the CPU.
 
 Model files live under `LLAMA_MODELS_ROOT`, normally a fast volume bind-mounted into the Docker LXC.
-`services/ai/models.txt` pins each public artifact by immutable repository revision and SHA-256.
-Before every AI deployment, `download-models.sh` verifies existing files and downloads only missing
-or corrupt artifacts. Downloads resume from a `.partial` file and are atomically renamed only after
-the checksum passes.
+The operator-owned `${CONFIG_DIR}/ai/models.txt` manifest pins each public artifact by immutable
+repository revision and SHA-256. Each non-comment line uses
+`relative-path|sha256|size-in-bytes|https-url`. Before every AI deployment,
+`download-models.sh` verifies existing files and downloads only missing or corrupt artifacts.
+Downloads resume from a `.partial` file and are atomically renamed only after the checksum passes.
 
 LiteLLM is the durable routing boundary between clients and llama-swap. Its model aliases and backend
 mappings are deliberately **not** committed to this repository. They live in the ZFS-backed

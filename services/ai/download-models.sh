@@ -2,8 +2,7 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-MODEL_MANIFEST="${LLAMA_MODEL_MANIFEST:-$SCRIPT_DIR/models.txt}"
+MODEL_MANIFEST="${LLAMA_MODEL_MANIFEST:-${CONFIG_DIR:?CONFIG_DIR not set}/ai/models.txt}"
 : "${LLAMA_MODELS_ROOT:?LLAMA_MODELS_ROOT not set}"
 
 for command in curl sha256sum; do

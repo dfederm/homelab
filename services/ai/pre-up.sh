@@ -15,6 +15,7 @@ set -euo pipefail
 CONFIG_DIR="${CONFIG_DIR:?CONFIG_DIR not set}"
 ENV_FILE="${ENV_FILE:?ENV_FILE not set}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+MODEL_MANIFEST="${LLAMA_MODEL_MANIFEST:-$CONFIG_DIR/ai/models.txt}"
 
 # source_env only exports CONFIG_DIR/ENV_FILE, so re-source the env for the creds
 # (same pattern as services/radicale/pre-up.sh).
@@ -34,7 +35,12 @@ if [ ! -f "$CONFIG_DIR/llama-swap/config.yml" ]; then
     exit 1
 fi
 
-bash "$SCRIPT_DIR/download-models.sh"
+if [ ! -f "$MODEL_MANIFEST" ]; then
+    echo "ERROR: model manifest not found: $MODEL_MANIFEST" >&2
+    exit 1
+fi
+
+LLAMA_MODEL_MANIFEST="$MODEL_MANIFEST" bash "$SCRIPT_DIR/download-models.sh"
 
 if ! command -v docker &> /dev/null; then
     echo "  ERROR: docker not found — ai pre-up needs the docker CLI" >&2
