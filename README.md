@@ -612,15 +612,16 @@ digest** (`${CONTAINER_REGISTRY}/david/athena-mcp:<tag>@sha256:…`). Renovate c
 registry, so the pin is bumped by hand: get the newest tag from the athena-mcp CI publish job summary
 and the digest from that build's registry manifest, then update both in `services/ai/docker-compose.yml`.
 
-Config is via env vars (see the `ATHENA_MCP_*` keys in `.env.template`). The Beszel/Scrutiny/Proxmox
-and Koffan *connection* details are reused from those services' own vars (Koffan is reached over the
-host's published port, `${DOCKER_HOST_IP}:${KOFFAN_HTTP_PORT}`, since it runs on a separate network).
-Home Assistant reuses `HOMEASSISTANT_IP` / `HOMEASSISTANT_HTTP_PORT`; its per-user tokens and
-hazard-focused denylist use `ATHENA_MCP_HOMEASSISTANT_*`. The other `ATHENA_MCP_*` keys are this
-service's own credentials. The internal SearXNG URL and established English search policy are fixed
-in compose. The search and direct-fetch domain filters default to empty, matching an unrestricted
-native domain-filter list. `Homelab__Proxmox__AllowInsecureTls=true` is set in compose (config, not a
-secret): the Proxmox API presents a self-signed cert, trusted for this client only.
+Config is via env vars (see the Athena MCP section in `.env.template`). The canonical
+`Users__<user-id>__Email` roster stores each email once; provider credentials use
+`Apps__<Provider>__Credentials__<user-id>__...` keys. Beszel/Scrutiny/Proxmox and Koffan
+*connection* details are reused from those services' own vars (Koffan is reached over the host's
+published port, `${DOCKER_HOST_IP}:${KOFFAN_HTTP_PORT}`, since it runs on a separate network).
+Home Assistant reuses `HOMEASSISTANT_IP` / `HOMEASSISTANT_HTTP_PORT`. Its hazard-focused denylist is
+one JSON-array environment value. The internal SearXNG URL and established English search policy are
+fixed in compose. The search and direct-fetch domain filters default to empty, matching an
+unrestricted native domain-filter list. `Homelab__Proxmox__AllowInsecureTls=true` is set in compose
+(config, not a secret): the Proxmox API presents a self-signed cert, trusted for this client only.
 
 **One-time operator setup** (needs admin on Forgejo/Beszel/Proxmox/Home Assistant + write access to
 the NAS config):
@@ -648,10 +649,11 @@ the NAS config):
    whose storage/guests to report).
 4. **Provision Home Assistant per-user access.** Keep HA's conversation-Assist exposure limited to
    entities Athena may read. For each Open WebUI family user, create a long-lived token while signed
-   into that same person's HA profile and set the matching
-   `ATHENA_MCP_HOMEASSISTANT_USER_<n>_EMAIL` / `_TOKEN`. The email must match the forwarded Open
-   WebUI identity exactly. Populate `ATHENA_MCP_HOMEASSISTANT_DENIED_ENTITY_ID_<n>` from a fresh
-   hazard inventory so consequential entities can still be read but never receive an action proof.
+   into that same person's HA profile and set their canonical roster email plus
+   `Apps__HomeAssistant__Credentials__<user-id>__AccessToken`. The email must match the forwarded
+   Open WebUI identity exactly. Populate the JSON array in
+   `Apps__HomeAssistant__DeniedEntityIds` from a fresh hazard inventory so consequential entities
+   can still be read but never receive an action proof.
 5. **Register the server in Open WebUI** (PersistentConfig/UI state) at
    `http://athena-mcp:8080`, grant it to the intended users/groups, and attach it to the Athena
    model. Keep that model's `builtin_tools` capability disabled. The server spotlights every tool
@@ -659,6 +661,31 @@ the NAS config):
    state that content inside that boundary is untrusted data, never instructions, and must not be
    echoed. Deploying the container only makes new tools reachable through an existing unfiltered
    connection; it does not create the connection, grants, model attachment, or prompt.
+
+**Canonical user-schema migration:** prepare the external env before deploying this compose revision.
+The currently pinned `0.1.41` image reads only the canonical schema.
+
+1. Add `Users__alice__Email` and `Users__bob__Email` to the NAS-hosted env, mapping each neutral
+   stable ID to one person's Open WebUI email. Add each available provider credential under that
+   same ID as shown in `.env.template`. A user can have credentials for only some providers. Omit
+   unavailable credential keys entirely; an uncommented blank credential is invalid and fails
+   closed.
+2. Replace the indexed Home Assistant denylist slots with the single JSON-array
+   `Apps__HomeAssistant__DeniedEntityIds` value. Wrap the JSON in outer single quotes so Bash
+   preserves its member quotes when sourcing the env file, for example
+   `Apps__HomeAssistant__DeniedEntityIds='["light.example_hazard","switch.example_hazard"]'`. Keep
+   every old indexed user and denylist variable during the compatibility window. The prior compose
+   revision maps only the old variables, while this revision passes only the canonical keys required
+   by the new image.
+3. Record the running image reference, then deploy `ai`. Verify the container is healthy before
+   testing one affected read-only tool for each configured user/provider combination. Also verify an
+   unconfigured provider is denied for that user without exposing a credential value.
+4. To roll back, restore the prior compose revision (whose Athena pin is
+   `0.1.37@sha256:1cb728717c217f38d452221a75e635d56df2f94ab821d94fbbaf0dabeac4a057`) and redeploy
+   `ai`; the retained indexed variables restore its configuration. Leave the canonical keys in place
+   during rollback.
+5. After the new image and all configured users are accepted, remove the old indexed variables in a
+   later external-env cleanup.
 
 After `./scripts/run-service.sh ai`, confirm `docker ps` shows `athena-mcp` `(healthy)` and
 `docker exec open-webui curl -s http://athena-mcp:8080/health` returns `Healthy`.
@@ -696,7 +723,7 @@ exposure. Writes add several server-enforced gates:
 2. Broad or unsupported lookups make that Open WebUI message read-only.
 3. The resolver signs a short-lived proof bound to the caller, chat, message, capability, and entity.
 4. A single in-memory turn ledger permits at most one HA action in that message.
-5. `ATHENA_MCP_HOMEASSISTANT_DENIED_ENTITY_ID_<n>` blocks known hazardous exact entities and groups
+5. `Apps__HomeAssistant__DeniedEntityIds` blocks known hazardous exact entities and groups
    containing them even when they otherwise resolve.
 
 This safety contract requires **one Athena MCP process**. Do not scale the service to non-sticky
