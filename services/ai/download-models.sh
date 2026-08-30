@@ -20,6 +20,8 @@ fi
 install -d "$LLAMA_MODELS_ROOT"
 
 while IFS='|' read -r relative_path expected_sha expected_size url; do
+    url=${url%$'\r'}
+
     [ -z "$relative_path" ] && continue
     [[ "$relative_path" == \#* ]] && continue
 

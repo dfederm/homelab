@@ -104,14 +104,18 @@ mkdir "$TMP_DIR/bin" "$TMP_DIR/models"
 printf 'test model payload\n' > "$TMP_DIR/source.gguf"
 expected_sha=$(sha256sum "$TMP_DIR/source.gguf" | cut -d' ' -f1)
 expected_size=$(wc -c < "$TMP_DIR/source.gguf")
-cat > "$TMP_DIR/manifest.txt" <<EOF
-test/model.gguf|$expected_sha|$expected_size|https://example.invalid/model.gguf
-EOF
+printf '%s|%s|%s|%s\r\n' \
+    "test/model.gguf" \
+    "$expected_sha" \
+    "$expected_size" \
+    "https://example.invalid/model.gguf" \
+    > "$TMP_DIR/manifest.txt"
 cat > "$TMP_DIR/bin/curl" <<'EOF'
 #!/bin/bash
 set -eu
 
 output=
+url=
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --output)
@@ -125,11 +129,13 @@ while [ "$#" -gt 0 ]; do
             shift
             ;;
         *)
+            url="$1"
             shift
             ;;
     esac
 done
 
+[ "$url" = "https://example.invalid/model.gguf" ]
 cp "$MOCK_MODEL_SOURCE" "$output"
 printf 'download\n' >> "$MOCK_CURL_LOG"
 EOF
@@ -148,9 +154,9 @@ run_downloader() {
 if run_downloader \
     && cmp -s "$TMP_DIR/source.gguf" "$TMP_DIR/models/test/model.gguf" \
     && [ "$(wc -l < "$TMP_DIR/curl.log")" -eq 1 ]; then
-    pass "model acquisition installs a verified artifact"
+    pass "model acquisition installs a verified artifact from a CRLF manifest"
 else
-    fail "model acquisition installs a verified artifact"
+    fail "model acquisition installs a verified artifact from a CRLF manifest"
 fi
 
 if run_downloader && [ "$(wc -l < "$TMP_DIR/curl.log")" -eq 1 ]; then
