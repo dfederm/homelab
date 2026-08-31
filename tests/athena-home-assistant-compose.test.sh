@@ -5,6 +5,7 @@ set -uo pipefail
 
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 COMPOSE="$REPO_DIR/services/ai/docker-compose.yml"
+PRE_UP="$REPO_DIR/services/ai/pre-up.sh"
 ENV_TEMPLATE="$REPO_DIR/.env.template"
 FAILURES=0
 
@@ -85,6 +86,9 @@ expect_absent "ATHENA_MCP_HOMEASSISTANT_DENIED_ENTITY_ID_" \
 expect_line "$ENV_TEMPLATE" \
     "ATHENA_MCP_HOMEASSISTANT_DENIED_ENTITY_IDS=[]" \
     "the scalar denylist is documented with an explicit empty default"
+expect_line "$PRE_UP" \
+    'chmod o+r "$CONFIG_DIR/athena/users.json"' \
+    "pre-up restores config-share readability after atomic file replacement"
 
 if command -v docker > /dev/null; then
     if docker compose --file "$COMPOSE" config --no-interpolate --quiet; then

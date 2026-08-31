@@ -697,8 +697,9 @@ the NAS config):
    then map each currently configured provider credential to that user's stable ID. Do this locally
    on the NAS without printing the source variables or generated JSON. Create a temporary file in
    `${CONFIG_DIR}/athena/`, then rename it to `users.json` in the same directory so replacement is
-   atomic. Athena MCP owns file loading, JSON parsing, and full roster and credential validation at
-   startup, before it can become healthy.
+   atomic. The `ai` pre-deploy hook reapplies the config share's container-readable file mode.
+   Athena MCP owns file loading, JSON parsing, and full roster and credential validation at startup,
+   before it can become healthy.
 
    Keep HA's conversation-Assist exposure limited to entities Athena may read. Transfer the current
    hazard inventory, without changing membership, to
