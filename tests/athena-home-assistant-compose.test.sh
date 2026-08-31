@@ -1,4 +1,5 @@
 #!/bin/bash
+# shellcheck disable=SC2016
 
 set -uo pipefail
 
@@ -39,7 +40,7 @@ expect_absent() {
     fi
 }
 
-echo "=== Athena MCP Home Assistant deployment contract ==="
+echo "=== Athena MCP user configuration deployment contract ==="
 
 service_count=$(grep -c '^  athena-mcp:' "$COMPOSE")
 if [ "$service_count" -eq 1 ]; then
@@ -48,54 +49,56 @@ else
     fail "exactly one Athena MCP service is declared"
 fi
 
-if grep -Eq \
-    '^    image: \$\{CONTAINER_REGISTRY\}/david/athena-mcp:[0-9]+\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}' \
-    "$COMPOSE"; then
-    pass "Athena MCP image is pinned by version and digest"
-else
-    fail "Athena MCP image is pinned by version and digest"
-fi
+expect_line "$COMPOSE" \
+    '    image: ${CONTAINER_REGISTRY}/david/athena-mcp:0.1.42@sha256:ef2825d0538abfc99f192b6a39fc9e4d1dc93b0ec25684fd9a6c6cc90e918596' \
+    "the PR 38 image is pinned by the published version and digest"
+expect_line "$COMPOSE" \
+    '      - ATHENA_MCP_USER_CONFIG_FILE=/run/secrets/athena-users.json' \
+    "the application reads the fixed in-container user configuration path"
+expect_line "$COMPOSE" \
+    '      - ${CONFIG_DIR}/athena/users.json:/run/secrets/athena-users.json:ro' \
+    "the external user configuration is mounted read-only"
+expect_line "$COMPOSE" \
+    "      - 'Apps__HomeAssistant__DeniedEntityIds=\${ATHENA_MCP_HOMEASSISTANT_DENIED_ENTITY_IDS}'" \
+    "the Home Assistant denylist uses one JSON-array value"
 
-# shellcheck disable=SC2016
+expect_line "$COMPOSE" \
+    '      - Identity__ForwardedUserJwtSecret=${OPEN_WEBUI_FORWARD_USER_JWT_SECRET}' \
+    "the shared forwarded-identity secret remains ordinary configuration"
 expect_line "$COMPOSE" \
     '      - Apps__HomeAssistant__BaseUrl=http://${HOMEASSISTANT_IP}:${HOMEASSISTANT_HTTP_PORT}' \
-    "Home Assistant base URL reuses the declared host variables"
-# shellcheck disable=SC2016
+    "the Home Assistant endpoint remains ordinary configuration"
 expect_line "$COMPOSE" \
-    '      - Apps__HomeAssistant__TargetProofLifetimeSeconds=${ATHENA_MCP_HOMEASSISTANT_TARGET_PROOF_LIFETIME_SECONDS:-90}' \
-    "target proof lifetime is configurable with the server default"
+    '      - Apps__Vikunja__BaseUrl=http://${DOCKER_HOST_IP}:${VIKUNJA_HTTP_PORT}' \
+    "the Vikunja endpoint remains ordinary configuration"
+expect_line "$COMPOSE" \
+    '      - Apps__Radicale__FamilyCalendarUrl=http://${DOCKER_HOST_IP}:${RADICALE_HTTP_PORT}/${ATHENA_MCP_RADICALE_FAMILY_CALENDAR_URL}' \
+    "the Radicale shared-list setting remains ordinary configuration"
 
-for index in $(seq 0 9); do
-    expect_line "$COMPOSE" \
-        "      - Apps__HomeAssistant__DeniedEntityIds__${index}=\${ATHENA_MCP_HOMEASSISTANT_DENIED_ENTITY_ID_${index}}" \
-        "denylist slot $index is mapped"
-    expect_line "$ENV_TEMPLATE" \
-        "ATHENA_MCP_HOMEASSISTANT_DENIED_ENTITY_ID_${index}=" \
-        "denylist slot $index is documented"
+for provider in HomeAssistant Vikunja Radicale Jellyfin Immich; do
+    expect_absent "Apps__${provider}__Users__" \
+        "$provider indexed roster and credential pass-through is removed"
 done
+expect_absent "ATHENA_MCP_HOMEASSISTANT_DENIED_ENTITY_ID_" \
+    "the old indexed Home Assistant denylist is not passed through or templated"
 
-for index in $(seq 0 4); do
-    expect_line "$COMPOSE" \
-        "      - Apps__HomeAssistant__Users__${index}__Email=\${ATHENA_MCP_HOMEASSISTANT_USER_${index}_EMAIL}" \
-        "Home Assistant user $index email is mapped"
-    expect_line "$COMPOSE" \
-        "      - Apps__HomeAssistant__Users__${index}__AccessToken=\${ATHENA_MCP_HOMEASSISTANT_USER_${index}_TOKEN}" \
-        "Home Assistant user $index token is mapped"
-    expect_line "$ENV_TEMPLATE" \
-        "ATHENA_MCP_HOMEASSISTANT_USER_${index}_EMAIL=" \
-        "Home Assistant user $index email is documented"
-    expect_line "$ENV_TEMPLATE" \
-        "ATHENA_MCP_HOMEASSISTANT_USER_${index}_TOKEN=" \
-        "Home Assistant user $index token is documented"
-done
+expect_line "$ENV_TEMPLATE" \
+    "ATHENA_MCP_HOMEASSISTANT_DENIED_ENTITY_IDS=[]" \
+    "the scalar denylist is documented with an explicit empty default"
 
-expect_absent "ha-mcp-bridge" "the old bridge service is removed"
-expect_absent "HA_MCP_TOKEN" "the retired shared bridge credential is removed"
-expect_absent "ghcr.io/open-webui/mcpo" "the mcpo image is removed"
+if command -v docker > /dev/null; then
+    if docker compose --file "$COMPOSE" config --no-interpolate --quiet; then
+        pass "AI Compose parses without interpolating secret values"
+    else
+        fail "AI Compose parses without interpolating secret values"
+    fi
+else
+    echo "  SKIP: Docker CLI is unavailable; Compose parsing was not run"
+fi
 
 echo
 if [ "$FAILURES" -eq 0 ]; then
-    echo "Athena MCP Home Assistant compose tests passed"
+    echo "Athena MCP user configuration deployment tests passed"
 else
     echo "$FAILURES test(s) failed"
 fi

@@ -612,15 +612,62 @@ digest** (`${CONTAINER_REGISTRY}/david/athena-mcp:<tag>@sha256:…`). Renovate c
 registry, so the pin is bumped by hand: get the newest tag from the athena-mcp CI publish job summary
 and the digest from that build's registry manifest, then update both in `services/ai/docker-compose.yml`.
 
-Config is via env vars (see the `ATHENA_MCP_*` keys in `.env.template`). The Beszel/Scrutiny/Proxmox
-and Koffan *connection* details are reused from those services' own vars (Koffan is reached over the
-host's published port, `${DOCKER_HOST_IP}:${KOFFAN_HTTP_PORT}`, since it runs on a separate network).
-Home Assistant reuses `HOMEASSISTANT_IP` / `HOMEASSISTANT_HTTP_PORT`; its per-user tokens and
-hazard-focused denylist use `ATHENA_MCP_HOMEASSISTANT_*`. The other `ATHENA_MCP_*` keys are this
-service's own credentials. The internal SearXNG URL and established English search policy are fixed
-in compose. The search and direct-fetch domain filters default to empty, matching an unrestricted
-native domain-filter list. `Homelab__Proxmox__AllowInsecureTls=true` is set in compose (config, not a
-secret): the Proxmox API presents a self-signed cert, trusted for this client only.
+Ordinary configuration remains in env vars (see the `ATHENA_MCP_*` keys in `.env.template`). The
+Beszel/Scrutiny/Proxmox and Koffan connection details are reused from those services' own vars
+(Koffan is reached over the host's published port, `${DOCKER_HOST_IP}:${KOFFAN_HTTP_PORT}`, since it
+runs on a separate network). Home Assistant reuses `HOMEASSISTANT_IP` /
+`HOMEASSISTANT_HTTP_PORT`; its proof lifetime and hazard-focused denylist also remain ordinary
+configuration. The internal SearXNG URL and established English search policy are fixed in compose.
+`Homelab__Proxmox__AllowInsecureTls=true` is set in compose (config, not a secret): the Proxmox API
+presents a self-signed cert, trusted for this client only.
+
+The canonical roster and per-user credentials are the exception. They live in the external
+`${CONFIG_DIR}/athena/users.json`, mounted read-only at `/run/secrets/athena-users.json`. The file is
+the complete authoritative snapshot for the roster and the Vikunja, Radicale, Jellyfin, Immich, and
+Home Assistant credential dictionaries:
+
+```json
+{
+  "Users": {
+    "user_id": { "Email": "user@example.invalid" }
+  },
+  "Apps": {
+    "Vikunja": {
+      "Credentials": {
+        "user_id": { "ApiToken": "replace-with-api-token" }
+      }
+    },
+    "Radicale": {
+      "Credentials": {
+        "user_id": {
+          "Username": "replace-with-username",
+          "Password": "replace-with-password"
+        }
+      }
+    },
+    "Jellyfin": {
+      "Credentials": {
+        "user_id": { "AccessToken": "replace-with-access-token" }
+      }
+    },
+    "Immich": {
+      "Credentials": {
+        "user_id": { "ApiKey": "replace-with-api-key" }
+      }
+    },
+    "HomeAssistant": {
+      "Credentials": {
+        "user_id": { "AccessToken": "replace-with-access-token" }
+      }
+    }
+  }
+}
+```
+
+Use stable lowercase IDs matching `[a-z][a-z0-9_]*`; emails and IDs must be unique
+case-insensitively. Omit a provider credential for users who do not use that provider. Never put
+endpoints, shared identity secrets, list settings, or unrelated application configuration in this
+file: the application ignores those keys here.
 
 **One-time operator setup** (needs admin on Forgejo/Beszel/Proxmox/Home Assistant + write access to
 the NAS config):
@@ -646,12 +693,18 @@ the NAS config):
    `pveum acl modify / --tokens 'athena@pve!mcp' --roles PVEAuditor`. Set `ATHENA_MCP_PROXMOX_TOKEN_ID`
    (`user@realm!tokenid`), `ATHENA_MCP_PROXMOX_TOKEN_SECRET`, and `ATHENA_MCP_PROXMOX_NODE` (the node
    whose storage/guests to report).
-4. **Provision Home Assistant per-user access.** Keep HA's conversation-Assist exposure limited to
-   entities Athena may read. For each Open WebUI family user, create a long-lived token while signed
-   into that same person's HA profile and set the matching
-   `ATHENA_MCP_HOMEASSISTANT_USER_<n>_EMAIL` / `_TOKEN`. The email must match the forwarded Open
-   WebUI identity exactly. Populate `ATHENA_MCP_HOMEASSISTANT_DENIED_ENTITY_ID_<n>` from a fresh
-   hazard inventory so consequential entities can still be read but never receive an action proof.
+4. **Create the user snapshot.** Build one canonical roster from the existing indexed email values,
+   then map each currently configured provider credential to that user's stable ID. Do this locally
+   on the NAS without printing the source variables or generated JSON. Create a temporary file in
+   `${CONFIG_DIR}/athena/`, then rename it to `users.json` in the same directory so replacement is
+   atomic. Athena MCP owns file loading, JSON parsing, and full roster and credential validation at
+   startup, before it can become healthy.
+
+   Keep HA's conversation-Assist exposure limited to entities Athena may read. Transfer the current
+   hazard inventory, without changing membership, to
+   `ATHENA_MCP_HOMEASSISTANT_DENIED_ENTITY_IDS` as one JSON array of exact entity IDs. In the NAS env,
+   use a shell-safe value such as `'["light.example","switch.example"]'`; use `[]` only when the
+   inventory is intentionally empty.
 5. **Register the server in Open WebUI** (PersistentConfig/UI state) at
    `http://athena-mcp:8080`, grant it to the intended users/groups, and attach it to the Athena
    model. Keep that model's `builtin_tools` capability disabled. The server spotlights every tool
@@ -660,7 +713,15 @@ the NAS config):
    echoed. Deploying the container only makes new tools reachable through an existing unfiltered
    connection; it does not create the connection, grants, model attachment, or prompt.
 
-After `./scripts/run-service.sh ai`, confirm `docker ps` shows `athena-mcp` `(healthy)` and
+**Credential migration and cutover:** keep the old indexed roster, provider credential, and Home
+Assistant denylist values in the external NAS env through acceptance; the new image ignores the
+credential entries because Compose no longer passes them through. Before deploying, back up that
+external env and record the current Homelab revision/image pin without displaying their contents.
+Temporarily prevent new Athena model responses in Open WebUI and let active responses finish before
+running `./scripts/run-service.sh ai` so replacing the Athena MCP container cannot reset the Home
+Assistant per-turn ledger mid-response.
+
+After deployment, confirm `docker ps` shows `athena-mcp` `(healthy)` and
 `docker exec open-webui curl -s http://athena-mcp:8080/health` returns `Healthy`.
 
 Sign in as a non-admin user through the Athena model and confirm `web_search` returns no more than
@@ -669,10 +730,21 @@ does not guarantee native source cards for these MCP tools, so treat the returne
 authoritative. Native search is PersistentConfig: keep it disabled under Admin Settings -> Web
 Search on an existing instance.
 
+Verify the intended image identity, then exercise at least one affected read-only tool for each
+configured user/provider without recording returned family data. For later credential-file-only
+updates, drain responses, replace `users.json` atomically, and run
+`./scripts/recreate-service.sh ai`; a plain container restart can retain the old bind-mounted inode,
+and a normal Compose up need not recreate an otherwise unchanged service.
+
 > **Health check:** the ASP.NET runtime image has no `curl`/`wget`/`bash`, so the container can't
 > probe its `/health` endpoint with a shell command. Instead the app probes itself — the `healthcheck`
 > re-invokes the binary as `dotnet /app/AthenaMcp.Server.dll --health-check`, which issues an
 > in-process GET to `/health` and exits `0` (healthy) / non-zero (unhealthy).
+
+If identity resolution, credential selection, startup validation, provider access, or Home
+Assistant safety fails, restore the prior Homelab revision/image and redeploy while the old external
+values are still present. Remove those legacy values only after the mounted-file deployment has
+been accepted.
 
 ### Home Assistant tools (curated Athena MCP wrapper)
 
@@ -696,7 +768,7 @@ exposure. Writes add several server-enforced gates:
 2. Broad or unsupported lookups make that Open WebUI message read-only.
 3. The resolver signs a short-lived proof bound to the caller, chat, message, capability, and entity.
 4. A single in-memory turn ledger permits at most one HA action in that message.
-5. `ATHENA_MCP_HOMEASSISTANT_DENIED_ENTITY_ID_<n>` blocks known hazardous exact entities and groups
+5. `ATHENA_MCP_HOMEASSISTANT_DENIED_ENTITY_IDS` blocks known hazardous exact entities and groups
    containing them even when they otherwise resolve.
 
 This safety contract requires **one Athena MCP process**. Do not scale the service to non-sticky
