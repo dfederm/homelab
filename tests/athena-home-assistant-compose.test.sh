@@ -5,8 +5,8 @@ set -uo pipefail
 
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 COMPOSE="$REPO_DIR/services/ai/docker-compose.yml"
-PRE_UP="$REPO_DIR/services/ai/pre-up.sh"
 ENV_TEMPLATE="$REPO_DIR/.env.template"
+README="$REPO_DIR/README.md"
 FAILURES=0
 
 pass() {
@@ -41,7 +41,7 @@ expect_absent() {
     fi
 }
 
-echo "=== Athena MCP user configuration deployment contract ==="
+echo "=== Athena MCP deployment contract ==="
 
 service_count=$(grep -c '^  athena-mcp:' "$COMPOSE")
 if [ "$service_count" -eq 1 ]; then
@@ -51,14 +51,20 @@ else
 fi
 
 expect_line "$COMPOSE" \
-    '    image: ${CONTAINER_REGISTRY}/david/athena-mcp:0.1.42@sha256:ef2825d0538abfc99f192b6a39fc9e4d1dc93b0ec25684fd9a6c6cc90e918596' \
-    "the PR 38 image is pinned by the published version and digest"
+    '    image: ${CONTAINER_REGISTRY}/david/athena-mcp:0.1.43@sha256:ba30a1aa8589686dbd1ccff0a2d7ba88b6560fdca983eacb96572b96b0860ea5' \
+    "the PR 39 image is pinned by the published version and digest"
 expect_line "$COMPOSE" \
     '      - ATHENA_MCP_USER_CONFIG_FILE=/run/secrets/athena-users.json' \
     "the application reads the fixed in-container user configuration path"
 expect_line "$COMPOSE" \
+    '      - Knowledge__CuratedRootPath=/knowledge' \
+    "the application reads curated knowledge from the fixed in-container root"
+expect_line "$COMPOSE" \
     '      - ${CONFIG_DIR}/athena/users.json:/run/secrets/athena-users.json:ro' \
     "the external user configuration is mounted read-only"
+expect_line "$COMPOSE" \
+    '      - ${CONFIG_DIR}/athena/knowledge:/knowledge:ro' \
+    "the external curated knowledge root is mounted read-only"
 expect_line "$COMPOSE" \
     "      - 'Apps__HomeAssistant__DeniedEntityIds=\${ATHENA_MCP_HOMEASSISTANT_DENIED_ENTITY_IDS}'" \
     "the Home Assistant denylist uses one JSON-array value"
@@ -86,9 +92,18 @@ expect_absent "ATHENA_MCP_HOMEASSISTANT_DENIED_ENTITY_ID_" \
 expect_line "$ENV_TEMPLATE" \
     "ATHENA_MCP_HOMEASSISTANT_DENIED_ENTITY_IDS=[]" \
     "the scalar denylist is documented with an explicit empty default"
-expect_line "$PRE_UP" \
-    'chmod o+r "$CONFIG_DIR/athena/users.json"' \
-    "pre-up restores config-share readability after atomic file replacement"
+expect_line "$ENV_TEMPLATE" \
+    '# Shared curated knowledge lives in ${CONFIG_DIR}/athena/knowledge and is mounted read-only at' \
+    "the external curated knowledge location is documented"
+expect_line "$README" \
+    '   `${CONFIG_DIR}/athena/`, set it to mode `0644`, then rename it to `users.json` in the same' \
+    "the atomic user snapshot procedure preserves container readability"
+
+if grep -Fq -- '${CONFIG_DIR}/athena/knowledge:/knowledge:rw' "$COMPOSE"; then
+    fail "the curated knowledge mount is never writable"
+else
+    pass "the curated knowledge mount is never writable"
+fi
 
 if command -v docker > /dev/null; then
     if docker compose --file "$COMPOSE" config --no-interpolate --quiet; then
@@ -102,7 +117,7 @@ fi
 
 echo
 if [ "$FAILURES" -eq 0 ]; then
-    echo "Athena MCP user configuration deployment tests passed"
+    echo "Athena MCP deployment tests passed"
 else
     echo "$FAILURES test(s) failed"
 fi

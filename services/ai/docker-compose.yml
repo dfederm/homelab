@@ -253,11 +253,14 @@ services:
     # Pinned by tag AND digest. Renovate can't reach this private registry, so
     # bump both by hand: get the newest tag from the athena-mcp CI publish job summary and the digest
     # from that build's registry manifest.
-    image: ${CONTAINER_REGISTRY}/david/athena-mcp:0.1.42@sha256:ef2825d0538abfc99f192b6a39fc9e4d1dc93b0ec25684fd9a6c6cc90e918596
+    image: ${CONTAINER_REGISTRY}/david/athena-mcp:0.1.43@sha256:ba30a1aa8589686dbd1ccff0a2d7ba88b6560fdca983eacb96572b96b0860ea5
     restart: unless-stopped
     environment:
       - TZ=${TZ}
       - ATHENA_MCP_USER_CONFIG_FILE=/run/secrets/athena-users.json
+      # Human-maintained shared knowledge stays in the external NAS config tree and is mounted
+      # read-only below. Athena validates the fixed registry/curated layout when a knowledge tool runs.
+      - Knowledge__CuratedRootPath=/knowledge
       # Beszel hub (PocketBase REST) — published on the Docker host. Auth is a read-only service
       # account (email Identity + Password); AuthCollection defaults to `users` unless a _superusers
       # token is needed to read every host's records. Share each new host with this account in Beszel
@@ -330,6 +333,7 @@ services:
       - Apps__Immich__PublicBaseUrl=https://${PHOTOS_FQDN}
     volumes:
       - ${CONFIG_DIR}/athena/users.json:/run/secrets/athena-users.json:ro
+      - ${CONFIG_DIR}/athena/knowledge:/knowledge:ro
     networks:
       - ai
     healthcheck:

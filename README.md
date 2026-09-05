@@ -669,6 +669,27 @@ case-insensitively. Omit a provider credential for users who do not use that pro
 endpoints, shared identity secrets, list settings, or unrelated application configuration in this
 file: the application ignores those keys here.
 
+Shared curated knowledge is also external NAS-owned configuration. Keep it under
+`${CONFIG_DIR}/athena/knowledge`, mounted read-only into Athena at `/knowledge`, with this fixed
+layout:
+
+```text
+knowledge/
+├── registry/
+│   └── household.yaml
+└── curated/
+    └── shared/
+        └── <topic>.md
+```
+
+Compose sets `Knowledge__CuratedRootPath=/knowledge`. Athena loads only the fixed registry file and
+top-level `*.md` files in `curated/shared`, validates the complete corpus when a knowledge tool is
+called, and keeps unrelated tools available if the corpus is missing or invalid.
+
+The knowledge mount is always read-only. Keep all real family entries outside this repository, and
+do not print corpus content in deployment or validation logs. The source change can be reviewed and
+validated without accessing the live corpus.
+
 **One-time operator setup** (needs admin on Forgejo/Beszel/Proxmox/Home Assistant + write access to
 the NAS config):
 
@@ -696,17 +717,22 @@ the NAS config):
 4. **Create the user snapshot.** Build one canonical roster from the existing indexed email values,
    then map each currently configured provider credential to that user's stable ID. Do this locally
    on the NAS without printing the source variables or generated JSON. Create a temporary file in
-   `${CONFIG_DIR}/athena/`, then rename it to `users.json` in the same directory so replacement is
-   atomic. The `ai` pre-deploy hook reapplies the config share's container-readable file mode.
-   Athena MCP owns file loading, JSON parsing, and full roster and credential validation at startup,
-   before it can become healthy.
+   `${CONFIG_DIR}/athena/`, set it to mode `0644`, then rename it to `users.json` in the same
+   directory so replacement is atomic. Rename preserves the temporary file's mode; setting it before
+   replacement keeps the file consistent with the config tree's container-readable permission
+   policy. Athena MCP owns file loading, JSON parsing, and full roster and credential validation at
+   startup, before it can become healthy.
 
    Keep HA's conversation-Assist exposure limited to entities Athena may read. Transfer the current
    hazard inventory, without changing membership, to
    `ATHENA_MCP_HOMEASSISTANT_DENIED_ENTITY_IDS` as one JSON array of exact entity IDs. In the NAS env,
    use a shell-safe value such as `'["light.example","switch.example"]'`; use `[]` only when the
    inventory is intentionally empty.
-5. **Register the server in Open WebUI** (PersistentConfig/UI state) at
+5. **Create the curated knowledge corpus.** Populate `${CONFIG_DIR}/athena/knowledge` using the fixed
+   layout above. Follow Athena MCP's `docs/knowledge-tools.md` schema and bounds. Keep the files
+   private on the NAS; do not copy them into this repository or deployment logs. Files created
+   locally on the NAS must retain the config tree's container-readable mode across replacement.
+6. **Register the server in Open WebUI** (PersistentConfig/UI state) at
    `http://athena-mcp:8080`, grant it to the intended users/groups, and attach it to the Athena
    model. Keep that model's `builtin_tools` capability disabled. The server spotlights every tool
    result inside an escaped `<external_data>` provenance boundary; set the model's system prompt to
@@ -725,6 +751,10 @@ Assistant per-turn ledger mid-response.
 After deployment, confirm `docker ps` shows `athena-mcp` `(healthy)` and
 `docker exec open-webui curl -s http://athena-mcp:8080/health` returns `Healthy`.
 
+Inspect the Athena container's `/knowledge` mount and confirm Docker reports it as read-only. Then,
+as an authenticated non-admin user, run a knowledge search that should match one known entry and
+expand its returned ID. Confirm the calls succeed without recording the returned family content.
+
 Sign in as a non-admin user through the Athena model and confirm `web_search` returns no more than
 five relevant result records and `fetch_url` retrieves a selected public result. Open WebUI v0.10.2
 does not guarantee native source cards for these MCP tools, so treat the returned/final URLs as
@@ -733,7 +763,8 @@ Search on an existing instance.
 
 Verify the intended image identity, then exercise at least one affected read-only tool for each
 configured user/provider without recording returned family data. For later credential-file-only
-updates, drain responses, replace `users.json` atomically, and run
+updates, drain responses, set the replacement file to mode `0644`, replace `users.json` atomically,
+and run
 `./scripts/recreate-service.sh ai`; a plain container restart can retain the old bind-mounted inode,
 and a normal Compose up need not recreate an otherwise unchanged service.
 
