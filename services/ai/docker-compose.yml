@@ -253,7 +253,7 @@ services:
     # Pinned by tag AND digest. Renovate can't reach this private registry, so
     # bump both by hand: get the newest tag from the athena-mcp CI publish job summary and the digest
     # from that build's registry manifest.
-    image: ${CONTAINER_REGISTRY}/david/athena-mcp:0.1.44@sha256:26692c087989b69cf54247862b30f6b520944008aed046bcaf1a1f59389122aa
+    image: ${CONTAINER_REGISTRY}/david/athena-mcp:0.1.45@sha256:c5b9abf9933e3ba3114e5e8ae442e9925212f8f0fdc58799ea4f2386b8c5a204
     restart: unless-stopped
     environment:
       - TZ=${TZ}
@@ -313,6 +313,9 @@ services:
       # bounds. The language matches the established SearXNG search policy.
       - Apps__Searxng__BaseUrl=http://searxng:8080/
       - Apps__Searxng__Language=en
+      # The SearXNG domain filter is ordinary configuration. Blank means no filtering; the app
+      # now accepts an empty JSON-array string, so leave it unset in live config unless needed.
+      - 'Apps__Searxng__DomainFilterList=${ATHENA_MCP_SEARXNG_DOMAIN_FILTER_LIST}'
       # Per-user media tools (search_media/list_new_media/list_resume_media/recommend_media) over the
       # family Jellyfin, gated by the same forwarded identity: the JWT is verified, then the caller's
       # email selects their Jellyfin ACCESS TOKEN — a per-user login-minted token, NOT a Dashboard
