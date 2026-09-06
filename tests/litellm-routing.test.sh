@@ -3,7 +3,6 @@
 set -uo pipefail
 
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-COMPOSE="$REPO_DIR/services/ai/docker-compose.yml"
 POST_UP="$REPO_DIR/services/ai/post-up.sh"
 FAILURES=0
 TMP_DIR=$(mktemp -d)
@@ -19,16 +18,6 @@ fail() {
 }
 
 echo "=== LiteLLM routing contract ==="
-
-if command -v docker > /dev/null; then
-    if docker compose --file "$COMPOSE" config --no-interpolate --quiet; then
-        pass "AI Compose file parses without interpolation"
-    else
-        fail "AI Compose file parses without interpolation"
-    fi
-else
-    echo "  SKIP: Docker CLI is unavailable; Compose parsing was not run"
-fi
 
 cat > "$TMP_DIR/curl" <<'EOF'
 #!/bin/bash

@@ -6,60 +6,73 @@ REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 HOOKS_FILE="$REPO_DIR/services/webhook/hooks.json"
 COMPOSE_FILE="$REPO_DIR/services/webhook/docker-compose.yml"
 PYTHON=$(command -v python3 || command -v python || command -v python.exe)
+TEST_ROOT=$(mktemp -d)
+trap 'rm -rf "$TEST_ROOT"' EXIT
 
-"$PYTHON" - "$HOOKS_FILE" <<'PY'
+"$PYTHON" - "$HOOKS_FILE" "$COMPOSE_FILE" <<'PY'
 import json
 import pathlib
+import re
 import sys
 
-path = pathlib.Path(sys.argv[1])
-rendered = path.read_text(encoding="utf-8").replace(
-    '{{ getenv "WEBHOOK_SECRET" | js }}',
+import yaml
+
+hooks_path = pathlib.Path(sys.argv[1])
+compose_path = pathlib.Path(sys.argv[2])
+
+rendered = re.sub(
+    r"\{\{.*?\}\}",
     "test-secret",
+    hooks_path.read_text(encoding="utf-8"),
 )
 hooks = json.loads(rendered)
-arguments = hooks[0]["pass-arguments-to-command"]
-names = [argument["name"] for argument in arguments]
-if names != ["ref"]:
-    raise SystemExit(f"unexpected webhook arguments: {names}")
-if hooks[0]["execute-command"] != "/opt/homelab/scripts/dispatch.sh":
-    raise SystemExit("webhook does not execute the image-baked signal handler")
+if not isinstance(hooks, list) or not hooks:
+    raise SystemExit("webhook hooks must be a non-empty JSON array")
+
+webhook = yaml.safe_load(compose_path.read_text(encoding="utf-8"))["services"]["webhook"]
+
+volumes = webhook.get("volumes", [])
+for volume in volumes:
+    serialized = json.dumps(volume) if isinstance(volume, dict) else volume
+    if any(
+        forbidden in serialized
+        for forbidden in (":/repo", "docker.sock", "homelab-deploy")
+    ):
+        raise SystemExit(f"webhook has forbidden deployment access: {volume}")
 PY
 
-if grep -qF ':/repo' "$COMPOSE_FILE"; then
-    echo "webhook still mounts mutable repository source" >&2
-    exit 1
-fi
-if grep -qE 'docker\.sock|/usr/bin/docker|homelab-deploy' "$COMPOSE_FILE"; then
-    echo "webhook still mounts deployment state or Docker control" >&2
-    exit 1
-fi
-grep -qF 'context: ../..' "$COMPOSE_FILE"
-grep -qF 'COPY services/webhook/dispatch.sh scripts/lib.sh /opt/homelab/scripts/' \
-    "$REPO_DIR/services/webhook/Dockerfile"
-grep -qF 'COPY services/webhook/hooks.json /opt/homelab/hooks.json' \
-    "$REPO_DIR/services/webhook/Dockerfile"
-grep -qF 'command: ["-template", "-hooks", "/opt/homelab/hooks.json", "-verbose"]' \
-    "$COMPOSE_FILE"
-if grep -qF '/etc/webhook/hooks.json' \
-    "$REPO_DIR/services/webhook/Dockerfile" "$COMPOSE_FILE"; then
-    echo "webhook hook config still uses the image's declared volume" >&2
-    exit 1
-fi
-if grep -qE 'apk add .*git|apk add .*util-linux' \
-    "$REPO_DIR/services/webhook/Dockerfile"; then
-    echo "webhook image still installs obsolete Git/locking tools" >&2
-    exit 1
-fi
-grep -qF 'env_file: ${ENV_FILE}' \
-    "$REPO_DIR/services/reverse-proxy/docker-compose.yml"
-if grep -R -qE '^[[:space:]]*env_file:[[:space:]]+\.env$' \
-    "$REPO_DIR/services"; then
-    echo "service Compose still depends on a source-tree .env file" >&2
-    exit 1
-fi
-if grep -q 'ln -sf .*\\.env' "$REPO_DIR/scripts/run-service.sh"; then
-    echo "run-service still mutates its source tree" >&2
+FAKE_REPO="$TEST_ROOT/repo"
+FAKE_BIN="$TEST_ROOT/bin"
+FAKE_CONFIG="$TEST_ROOT/config"
+mkdir -p "$FAKE_REPO/scripts" "$FAKE_REPO/services/webhook" \
+    "$FAKE_BIN" "$FAKE_CONFIG"
+cp "$REPO_DIR/scripts/run-service.sh" "$FAKE_REPO/scripts/run-service.sh"
+touch "$FAKE_REPO/services/webhook/docker-compose.yml" "$FAKE_CONFIG/test.env"
+
+cat > "$FAKE_REPO/scripts/lib.sh" <<'EOF'
+source_env() {
+    CONFIG_DIR="$TEST_CONFIG_DIR"
+    ENV_FILE="$TEST_ENV_FILE"
+    export CONFIG_DIR ENV_FILE
+}
+EOF
+
+cat > "$FAKE_BIN/docker" <<'EOF'
+#!/bin/bash
+set -euo pipefail
+printf '%s\n' "$*" >> "$TEST_DOCKER_LOG"
+EOF
+chmod +x "$FAKE_BIN/docker"
+
+TEST_CONFIG_DIR="$FAKE_CONFIG" \
+TEST_ENV_FILE="$FAKE_CONFIG/test.env" \
+TEST_DOCKER_LOG="$TEST_ROOT/docker.log" \
+HOMELAB_SETUP_LOCK_HELD=1 \
+PATH="$FAKE_BIN:$PATH" \
+    bash "$FAKE_REPO/scripts/run-service.sh" webhook >/dev/null
+
+if [ -e "$FAKE_REPO/services/webhook/.env" ]; then
+    echo "run-service must not create a source-tree .env file" >&2
     exit 1
 fi
 

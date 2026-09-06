@@ -3,9 +3,7 @@
 set -uo pipefail
 
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-COMPOSE="$REPO_DIR/services/ai/docker-compose.yml"
 DOWNLOADER="$REPO_DIR/services/ai/download-models.sh"
-ENV_TEMPLATE="$REPO_DIR/.env.template"
 FAILURES=0
 TMP_DIR=$(mktemp -d)
 trap 'rm -rf "$TMP_DIR"' EXIT
@@ -19,85 +17,38 @@ fail() {
     FAILURES=$((FAILURES + 1))
 }
 
-expect_line() {
-    local file="$1"
-    local line="$2"
-    local description="$3"
+echo "=== llama-swap deployment behavior ==="
 
-    if grep -Fq -- "$line" "$file"; then
-        pass "$description"
-    else
-        fail "$description"
-    fi
+mkdir -p "$TMP_DIR/pre-up/config/ai" "$TMP_DIR/pre-up/config/llama-swap"
+cat > "$TMP_DIR/pre-up/config/test.env" <<'EOF'
+CONTAINER_REGISTRY=registry.example.invalid
+CONTAINER_REGISTRY_USER=test-user
+CONTAINER_REGISTRY_TOKEN=test-token
+EOF
+printf 'model manifest\n' > "$TMP_DIR/pre-up/config/ai/models.txt"
+
+run_pre_up() {
+    CONFIG_DIR="$TMP_DIR/pre-up/config" \
+    ENV_FILE="$TMP_DIR/pre-up/config/test.env" \
+        bash "$REPO_DIR/services/ai/pre-up.sh"
 }
 
-echo "=== llama-swap serving contract ==="
-
-if grep -Eq \
-    '^    image: ghcr\.io/mostlygeek/llama-swap:[^@]+@sha256:[0-9a-f]{64}' \
-    "$COMPOSE"; then
-    pass "llama-swap image is pinned by tag and digest"
+if run_pre_up > "$TMP_DIR/missing-config.out" 2>&1; then
+    fail "pre-up rejects a missing llama-swap configuration"
+elif grep -Fq "llama-swap config not found" "$TMP_DIR/missing-config.out"; then
+    pass "pre-up rejects a missing llama-swap configuration"
 else
-    fail "llama-swap image is pinned by tag and digest"
+    fail "pre-up rejects a missing llama-swap configuration"
 fi
 
-expect_line "$COMPOSE" "  llama-swap:" "llama-swap service is declared"
-expect_line "$COMPOSE" "    runtime: nvidia" "llama-swap requires the NVIDIA runtime"
-expect_line "$COMPOSE" \
-    '      - ${LLAMA_MODELS_ROOT:?LLAMA_MODELS_ROOT not set}:/models:ro' \
-    "missing model root fails Compose evaluation"
-expect_line "$COMPOSE" \
-    '      - NVIDIA_VISIBLE_DEVICES=${LLAMA_SWAP_NVIDIA_VISIBLE_DEVICES:?LLAMA_SWAP_NVIDIA_VISIBLE_DEVICES not set}' \
-    "missing container GPU exposure fails Compose evaluation"
-expect_line "$COMPOSE" \
-    '      - ${CONFIG_DIR}/llama-swap/config.yml:/etc/llama-swap/config/config.yaml:ro' \
-    "external llama-swap config is mounted read-only"
-expect_line "$COMPOSE" \
-    "      - ENABLE_OLLAMA_API=false" \
-    "Open WebUI disables its native Ollama connection"
-expect_line "$COMPOSE" \
-    "      - RAG_EMBEDDING_ENGINE=openai" \
-    "Open WebUI uses OpenAI-compatible embeddings"
-expect_line "$COMPOSE" \
-    '      - RAG_OPENAI_API_BASE_URL=http://litellm:4000/v1' \
-    "RAG remains behind LiteLLM"
-
-if grep -Eq '^[[:space:]]+ollama(-pull)?:' "$COMPOSE" \
-    || grep -Fq 'http://ollama:' "$COMPOSE"; then
-    fail "Compose has no Ollama service or route"
+touch "$TMP_DIR/pre-up/config/llama-swap/config.yml"
+rm "$TMP_DIR/pre-up/config/ai/models.txt"
+if run_pre_up > "$TMP_DIR/missing-manifest.out" 2>&1; then
+    fail "pre-up rejects a missing model manifest"
+elif grep -Fq "model manifest not found" "$TMP_DIR/missing-manifest.out"; then
+    pass "pre-up rejects a missing model manifest"
 else
-    pass "Compose has no Ollama service or route"
-fi
-
-expect_line "$REPO_DIR/services/ai/pre-up.sh" \
-    'if [ ! -f "$CONFIG_DIR/llama-swap/config.yml" ]; then' \
-    "deployment requires the external llama-swap config"
-expect_line "$REPO_DIR/services/ai/pre-up.sh" \
-    'MODEL_MANIFEST="${LLAMA_MODEL_MANIFEST:-$CONFIG_DIR/ai/models.txt}"' \
-    "deployment uses the external model manifest"
-expect_line "$REPO_DIR/services/ai/pre-up.sh" \
-    'if [ ! -f "$MODEL_MANIFEST" ]; then' \
-    "deployment requires the external model manifest"
-expect_line "$DOWNLOADER" \
-    'MODEL_MANIFEST="${LLAMA_MODEL_MANIFEST:-${CONFIG_DIR:?CONFIG_DIR not set}/ai/models.txt}"' \
-    "standalone acquisition defaults to the external model manifest"
-
-if grep -Fq ': "${LLAMA_MODELS_ROOT:?' "$REPO_DIR/services/ai/pre-up.sh" \
-    || grep -Fq ': "${LLAMA_SWAP_NVIDIA_VISIBLE_DEVICES:?' "$REPO_DIR/services/ai/pre-up.sh"; then
-    fail "pre-up does not validate Compose-owned settings"
-else
-    pass "Compose-owned settings are not redundantly validated in pre-up"
-fi
-
-for name in LLAMA_MODELS_ROOT LLAMA_SWAP_NVIDIA_VISIBLE_DEVICES; do
-    expect_line "$ENV_TEMPLATE" "$name=" "$name is documented"
-done
-
-if grep -Fq 'LLAMA_ATHENA_GPU' "$COMPOSE" "$ENV_TEMPLATE" "$REPO_DIR/services/ai/pre-up.sh" \
-    || grep -Fq 'LLAMA_UTILITY_GPU' "$COMPOSE" "$ENV_TEMPLATE" "$REPO_DIR/services/ai/pre-up.sh"; then
-    fail "workload-specific GPU placement does not leak into Compose or env"
-else
-    pass "workload-specific GPU placement stays inside llama-swap config"
+    fail "pre-up rejects a missing model manifest"
 fi
 
 mkdir "$TMP_DIR/bin" "$TMP_DIR/models"

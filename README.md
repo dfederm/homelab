@@ -1048,6 +1048,26 @@ Values with spaces must be quoted:
 HOMELAB_SETUP_MODULES="create-users install-tools install-docker"
 ```
 
+## Tests
+
+Tests are standalone Bash scripts under `tests/`. Run one directly:
+
+```bash
+bash tests/setup-timezone.test.sh
+```
+
+Or run the complete suite:
+
+```bash
+for test in tests/*.test.sh; do
+    bash "$test" || exit
+done
+```
+
+The Compose test requires Python with PyYAML. When Docker Compose is installed it also runs
+`docker compose config --no-interpolate` against every service definition; otherwise it reports that
+semantic Compose validation was skipped and uses the PyYAML structural fallback.
+
 ## Image Management
 
 Docker images are pinned to specific versions with SHA256 digests for reproducibility. [Renovate Bot](https://docs.renovatebot.com/) automatically opens PRs when new versions are available, so updates are reviewed before deployment.
