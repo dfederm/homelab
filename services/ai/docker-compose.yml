@@ -205,7 +205,7 @@ services:
   # http://searxng:8080.
   searxng:
     container_name: searxng
-    image: searxng/searxng:2026.6.26-f8ffbf36f@sha256:15275f138662b0eefd62c492a919b29c4662c42004efe4b1a245c92cc6d2fef1
+    image: searxng/searxng:2026.9.5-c7f3080aa@sha256:55e1fa15a63ff04e79e213e6aa2837549877b0c6d60757cdb633ae9111cb5fea
     restart: unless-stopped
     environment:
       - TZ=${TZ}
@@ -253,7 +253,7 @@ services:
     # Pinned by tag AND digest. Renovate can't reach this private registry, so
     # bump both by hand: get the newest tag from the athena-mcp CI publish job summary and the digest
     # from that build's registry manifest.
-    image: ${CONTAINER_REGISTRY}/david/athena-mcp:0.1.45@sha256:c5b9abf9933e3ba3114e5e8ae442e9925212f8f0fdc58799ea4f2386b8c5a204
+    image: ${CONTAINER_REGISTRY}/david/athena-mcp:0.1.46@sha256:14291b1dccdb94fe8441a2589c807903c75c3450ca957c36a3f313010bfcdbad
     restart: unless-stopped
     environment:
       - TZ=${TZ}
