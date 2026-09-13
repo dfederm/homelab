@@ -1064,6 +1064,12 @@ for test in tests/*.test.sh; do
 done
 ```
 
+The PowerShell operator tools have a standalone mocked test entrypoint:
+
+```powershell
+pwsh -NoLogo -NoProfile -File tests\Test-DeploymentOperatorTools.ps1
+```
+
 The Compose test requires Python with PyYAML. When Docker Compose is installed it also runs
 `docker compose config --no-interpolate` against every service definition; otherwise it reports that
 semantic Compose validation was skipped and uses the PyYAML structural fallback.
@@ -1157,6 +1163,47 @@ Roll out the coordinator without letting the old fire-and-forget webhook start o
 7. Retain the old shared checkout for rollback; remove it only as a separate explicitly approved cleanup
 
 For manual deployments (e.g. after changing env files), run `${HOMELAB_REPO_DIR}/scripts/deploy.sh` on a top-level machine. It holds the same local setup lock across its pull and setup phases and records the successful commit. Inside an LXC, run setup and service commands from `${HOMELAB_REPO_DIR}`, not the shared checkout. `run-service.sh <name>` / `run-all-services.sh` use the same lock; `recreate-service.sh <name>` delegates to the locked single-service path.
+
+### Operator Tools
+
+Repository-owned PowerShell commands under `tools/` support deployment operations from an operator
+workstation without embedding any Homelab-specific topology:
+
+- `Get-ForgejoContainerPin.ps1` resolves a Forgejo container package to an immutable
+  `version@sha256:digest` reference. Host, owner, package, and a local Git checkout whose `origin`
+  uses the same Forgejo credential are explicit inputs. When version is omitted, the newest numeric
+  semantic version is selected. Authentication failures are sanitized, and one stale Git Credential
+  Manager refresh is attempted before the API request fails.
+- `Wait-HomelabDeployment.ps1` waits for an exact full commit to appear in every target's
+  `last-success`. Targets are supplied explicitly as name/address mappings. Worker and event state
+  are reported as progress, and a `run-failure` event for the requested commit fails immediately,
+  but only `last-success` proves deployment completion.
+
+Example with placeholder values:
+
+```powershell
+$pin = & .\tools\Get-ForgejoContainerPin.ps1 `
+    -ForgejoHost forgejo.example.com `
+    -Owner example `
+    -Package application `
+    -CredentialRepo C:\path\to\forgejo-checkout
+
+$targets = [ordered]@{
+    primary = "192.0.2.10"
+    remote = "host.example.com"
+}
+
+& .\tools\Wait-HomelabDeployment.ps1 `
+    -Commit 0123456789abcdef0123456789abcdef01234567 `
+    -Targets $targets
+```
+
+The watcher verifies the generic Homelab deployment coordinator only. Service-specific checks such
+as container health or an expected image pin remain separate operator steps because they are not
+proof that every top-level target completed the requested commit. For detailed live setup output,
+use `ssh root@<target> tail -F /var/log/homelab-deploy/latest.log` (or the target's configured
+`DEPLOY_LOG_DIR`) alongside the watcher. The stable log is diagnostic output; `last-success` and
+commit-specific events remain the watcher's authoritative completion and failure signals.
 
 ### GitHub Webhook Configuration
 
