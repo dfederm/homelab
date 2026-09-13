@@ -214,6 +214,15 @@ run_worker >/dev/null 2>&1 &
 WORKER_PID=$!
 wait_for_file "$CONTROL/started-$COMMIT_A"
 
+LATEST_LOG="$WORKER_LOGS/latest.log"
+wait_for_file "$LATEST_LOG"
+[ -L "$LATEST_LOG" ] || fail "latest deployment log is not a symlink"
+LATEST_TARGET_A=$(readlink "$LATEST_LOG")
+[[ "$LATEST_TARGET_A" != /* ]] \
+    || fail "latest deployment log does not use a relative target"
+grep -q "Desired commit: $COMMIT_A" "$LATEST_LOG" \
+    || fail "latest deployment log does not expose the active run"
+
 printf 'b\n' > "$SEED/value.txt"
 git -C "$SEED" commit -am B >/dev/null
 printf 'c\n' > "$SEED/value.txt"
@@ -237,6 +246,13 @@ assert_equals "$COMMIT_C" "$(cat "$WORKER_STATE/last-success")" \
     "worker records only the successful commit"
 grep -q $'trailing-run\t' "$WORKER_STATE/events.log" \
     || fail "worker did not log its trailing pass"
+LATEST_TARGET_C=$(readlink "$LATEST_LOG")
+[ "$LATEST_TARGET_C" != "$LATEST_TARGET_A" ] \
+    || fail "latest deployment log did not advance to the trailing run"
+grep -q "Desired commit: $COMMIT_C" "$LATEST_LOG" \
+    || fail "latest deployment log does not expose the newest run"
+grep -q '=== Deployment succeeded ===' "$LATEST_LOG" \
+    || fail "latest deployment log does not retain successful completion"
 
 run_worker >/dev/null 2>&1
 assert_equals "2" "$(wc -l < "$CONTROL/runs" | tr -d ' ')" \
@@ -262,9 +278,15 @@ else
 fi
 assert_equals "$COMMIT_D" "$(cat "$WORKER_STATE/last-success")" \
     "failed setup does not advance successful state"
+grep -q "Desired commit: $COMMIT_E" "$LATEST_LOG" \
+    || fail "latest deployment log does not expose the failed run"
+grep -q '=== Deployment failed (status 7) ===' "$LATEST_LOG" \
+    || fail "latest deployment log does not retain failed completion"
 run_worker >/dev/null 2>&1
 assert_equals "$COMMIT_E" "$(cat "$WORKER_STATE/last-success")" \
     "later reconciliation retries a failed commit"
+grep -q '=== Deployment succeeded ===' "$LATEST_LOG" \
+    || fail "latest deployment log did not advance to the successful retry"
 
 touch "$CONTROL/fail-once-$COMMIT_E"
 run_worker_signal
@@ -289,6 +311,20 @@ assert_equals "$((RUN_COUNT + 1))" \
     "stale active signal from a killed worker is recovered"
 [ ! -e "$WORKER_STATE/active-signal" ] \
     || fail "recovered active signal was not cleared"
+
+echo "=== latest deployment log retention ==="
+
+LATEST_TARGET=$(readlink -f "$LATEST_LOG")
+STALE_LOG="$WORKER_LOGS/stale.log"
+printf 'stale\n' > "$STALE_LOG"
+touch -d '31 days ago' "$LATEST_TARGET" "$STALE_LOG"
+run_worker >/dev/null 2>&1
+[ -f "$LATEST_TARGET" ] \
+    || fail "retention deleted the latest deployment log target"
+[ ! -e "$STALE_LOG" ] \
+    || fail "retention preserved an unrelated old deployment log"
+assert_equals "$LATEST_TARGET" "$(readlink -f "$LATEST_LOG")" \
+    "retention changed the latest deployment log pointer"
 
 echo "=== interrupted signal claim preserves durable intent ==="
 
@@ -321,6 +357,8 @@ run_worker >/dev/null 2>&1
 assert_equals "$((RUN_COUNT + 1))" \
     "$(wc -l < "$CONTROL/runs" | tr -d ' ')" \
     "interrupted same-commit signal is recovered"
+[ ! -e "$LATEST_TARGET" ] \
+    || fail "superseded old latest deployment log was not cleaned up"
 
 echo "=== worker fetch occurs after the setup lock ==="
 
@@ -348,6 +386,8 @@ wait "$LOCK_PID"
 wait "$WAITING_WORKER_PID"
 assert_equals "$COMMIT_F" "$(tail -n 1 "$CONTROL/runs")" \
     "worker fetches latest origin/main only after obtaining the target lock"
+grep -q "Desired commit: $COMMIT_F" "$LATEST_LOG" \
+    || fail "latest deployment log did not advance to the next deployment"
 
 echo "=== partially corrupt checkout recovery ==="
 

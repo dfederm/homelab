@@ -1123,14 +1123,26 @@ Target-local deployment data uses these paths by default:
 
 - `${HOMELAB_REPO_DIR}` (`/opt/homelab/repo`) — reusable Git checkout, or stable copied source inside an LXC
 - `${DEPLOY_STATE_DIR}` (`/var/lib/homelab-deploy`) — pending bit, last successful commit, and run/coalescing events
-- `${DEPLOY_LOG_DIR}` (`/var/log/homelab-deploy`) — preserved per-run setup output
+- `${DEPLOY_LOG_DIR}` (`/var/log/homelab-deploy`) — preserved per-run setup output, with `latest.log` pointing to the active or most recent run
+
+To follow the active or latest deployment and automatically switch when a newer
+run starts:
+
+```bash
+tail -F /var/log/homelab-deploy/latest.log
+```
+
+Use the configured `DEPLOY_LOG_DIR` instead if it differs from the default.
 
 For each LXC's first local-copy setup, `create-lxcs` maps the host's resolved
 `CONFIG_DIR` through that LXC's `_MP0`, `_MP1`, ... entries to derive the
 corresponding config path inside the guest. Different LXCs may therefore mount
 the shared homelab root at different guest paths without another setting.
 
-`DEPLOY_RETENTION_DAYS` removes old per-run logs. The event log rotates by `DEPLOY_EVENT_LOG_MAX_BYTES` and retains one previous segment.
+`DEPLOY_RETENTION_DAYS` removes old per-run logs. The run referenced by
+`latest.log` is retained until a newer run replaces it, so the stable path
+remains usable during long periods without deployments. The event log rotates
+by `DEPLOY_EVENT_LOG_MAX_BYTES` and retains one previous segment.
 
 ### Coordinator Rollout
 

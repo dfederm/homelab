@@ -30,6 +30,7 @@ if ! [[ "$DEPLOY_RETENTION_DAYS" =~ ^[0-9]+$ ]]; then
 fi
 
 mkdir -p "$DEPLOY_STATE_DIR" "$DEPLOY_LOG_DIR" /run/lock
+LATEST_LOG="$DEPLOY_LOG_DIR/latest.log"
 
 WORKER_LOCK_FILE="${HOMELAB_DEPLOY_WORKER_LOCK:-/run/lock/homelab-deploy-worker.lock}"
 mkdir -p "$(dirname "$WORKER_LOCK_FILE")"
@@ -181,7 +182,8 @@ while true; do
 
     if [ "$SIGNALED" = false ] && [ "$DESIRED_COMMIT" = "$APPLIED_COMMIT" ]; then
         event reconcile-noop "commit=$DESIRED_COMMIT"
-        deploy_state_cleanup_logs "$DEPLOY_LOG_DIR" "$DEPLOY_RETENTION_DAYS"
+        deploy_state_cleanup_logs "$DEPLOY_LOG_DIR" "$DEPLOY_RETENTION_DAYS" \
+            "$LATEST_LOG"
         exit 0
     fi
 
@@ -203,6 +205,7 @@ while true; do
         echo "Trigger: $TRIGGER"
         echo ""
     } > "$RUN_LOG"
+    deploy_state_atomic_symlink "$LATEST_LOG" "$RUN_ID.log"
 
     status=0
     set +e
@@ -220,7 +223,8 @@ while true; do
             "status=$status"
         printf '\n=== Deployment failed (status %s) ===\n' "$status" \
             >> "$RUN_LOG"
-        deploy_state_cleanup_logs "$DEPLOY_LOG_DIR" "$DEPLOY_RETENTION_DAYS"
+        deploy_state_cleanup_logs "$DEPLOY_LOG_DIR" "$DEPLOY_RETENTION_DAYS" \
+            "$LATEST_LOG"
         exit "$status"
     fi
 
@@ -229,7 +233,8 @@ while true; do
     [ "$SIGNALED" = false ] || complete_signal
     event run-success "run=$RUN_ID" "applied=$DESIRED_COMMIT"
     printf '\n=== Deployment succeeded ===\n' >> "$RUN_LOG"
-    deploy_state_cleanup_logs "$DEPLOY_LOG_DIR" "$DEPLOY_RETENTION_DAYS"
+    deploy_state_cleanup_logs "$DEPLOY_LOG_DIR" "$DEPLOY_RETENTION_DAYS" \
+        "$LATEST_LOG"
 
     if pending_signal_exists; then
         event trailing-run "previous=$DESIRED_COMMIT"

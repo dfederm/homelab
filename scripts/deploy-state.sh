@@ -46,6 +46,25 @@ deploy_state_atomic_write() {
     mv "$tmp" "$file"
 }
 
+deploy_state_atomic_symlink() {
+    local link="$1"
+    local target="$2"
+    local directory tmp
+
+    directory=$(dirname "$link")
+    mkdir -p "$directory"
+    tmp=$(mktemp "$directory/.symlink.XXXXXX")
+    rm -f "$tmp"
+    if ! ln -s "$target" "$tmp"; then
+        rm -f "$tmp"
+        return 1
+    fi
+    if ! mv -Tf "$tmp" "$link"; then
+        rm -f "$tmp"
+        return 1
+    fi
+}
+
 deploy_state_read_commit() {
     local file="$1"
     local commit
@@ -86,8 +105,20 @@ deploy_state_append_event() {
 deploy_state_cleanup_logs() {
     local log_dir="$1"
     local retention_days="$2"
+    local protected_link="${3:-}"
+    local protected_file=""
 
     [[ "$retention_days" =~ ^[0-9]+$ ]] || return 1
     [ -d "$log_dir" ] || return 0
-    find "$log_dir" -type f -mtime "+$retention_days" -delete
+    log_dir=$(readlink -f "$log_dir")
+    if [ -n "$protected_link" ] && [ -L "$protected_link" ]; then
+        protected_file=$(readlink -f "$protected_link" 2>/dev/null || true)
+    fi
+
+    if [ -n "$protected_file" ]; then
+        find "$log_dir" -type f -mtime "+$retention_days" \
+            ! -path "$protected_file" -delete
+    else
+        find "$log_dir" -type f -mtime "+$retention_days" -delete
+    fi
 }
