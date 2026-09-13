@@ -3,7 +3,7 @@ services:
   app:
     container_name: filestash
     # Filestash only publishes :latest (no versioned tags), so pin by digest
-    image: machines/filestash:latest@sha256:32f15c563f80dd81fef13bf845b137dc9c240ec5fbcf5cdadef7f06ee349152e
+    image: machines/filestash:latest@sha256:4c19475226d9e26f670ce4284f8e8115d42ee41cba6118defff4239eaf1ea65d
     restart: unless-stopped
     environment:
     - APPLICATION_URL=
