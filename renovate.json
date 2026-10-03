@@ -18,6 +18,16 @@
       ]
     },
     {
+      "description": "Track llama-swap CUDA 13 releases without switching variants",
+      "matchDatasources": [
+        "docker"
+      ],
+      "matchPackageNames": [
+        "ghcr.io/mostlygeek/llama-swap"
+      ],
+      "versioning": "regex:^unified-cuda13-(?<patch>\\d+)$"
+    },
+    {
       "description": "Don't update dependencies managed by upstream app authors",
       "matchDatasources": [
         "docker"
