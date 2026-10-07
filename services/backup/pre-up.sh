@@ -10,6 +10,7 @@
 #
 # Reads each target's BACKUP_DEST from <CONFIG_DIR>/backup/<instance>.env (the documented
 # per-target location). Destinations on DIFFERENT remotes never conflict (separate drives).
+# Also requires an existing absolute BACKUP_SOURCE_PATH in each target's env file.
 
 set -euo pipefail
 
@@ -18,14 +19,14 @@ set -euo pipefail
 # Instance list: the argument from run-service, or BACKUP_INSTANCES when run standalone.
 INSTANCES="${1:-${BACKUP_INSTANCES:-}}"
 
-# Read BACKUP_DEST for one target. Grep (not source): instance env files are docker
+# Read one KEY for one target. Grep (not source): instance env files are docker
 # --env-file KEY=VALUE format, where unquoted values with spaces (e.g. BACKUP_CRON=0 3 * * *)
 # would break a shell source. Returns non-zero if the file or the key is absent.
-get_dest() {
-    local f="$CONFIG_DIR/backup/$1.env" v
+get_var() {
+    local f="$CONFIG_DIR/backup/$1.env" key="$2" v
     [ -f "$f" ] || return 1
-    v=$(grep -E '^[[:space:]]*BACKUP_DEST=' "$f" | tail -n1) || return 1
-    v=${v#*BACKUP_DEST=}            # strip the key
+    v=$(grep -E "^[[:space:]]*${key}=" "$f" | tail -n1) || return 1
+    v=${v#*"${key}"=}               # strip the key
     v=${v%$'\r'}                    # strip a trailing CR (CRLF files)
     v="${v%"${v##*[![:space:]]}"}"  # rtrim trailing whitespace
     case "$v" in                    # strip one layer of surrounding quotes
@@ -56,8 +57,33 @@ overlaps() {
 }
 
 names=() remotes=() paths=()
+if [ "${BACKUP_SOURCE_PATH+x}" = x ]; then
+    echo "ERROR: BACKUP_SOURCE_PATH must be set only in each target's env file, not the machine environment" >&2
+    exit 1
+fi
+
 for inst in $INSTANCES; do
-    if ! dest=$(get_dest "$inst"); then
+    if ! source_path=$(get_var "$inst" BACKUP_SOURCE_PATH); then
+        echo "ERROR: backup target '$inst' must set BACKUP_SOURCE_PATH in its env file" >&2
+        exit 1
+    fi
+    case "$source_path" in
+        /)
+            echo "ERROR: backup target '$inst' must not back up the filesystem root" >&2
+            exit 1
+            ;;
+        /*) ;;
+        *)
+            echo "ERROR: backup target '$inst' has a relative BACKUP_SOURCE_PATH: $source_path" >&2
+            exit 1
+            ;;
+    esac
+    if [ ! -d "$source_path" ]; then
+        echo "ERROR: backup target '$inst' BACKUP_SOURCE_PATH is not an existing directory: $source_path" >&2
+        exit 1
+    fi
+
+    if ! dest=$(get_var "$inst" BACKUP_DEST); then
         echo "  WARNING: no BACKUP_DEST for backup target '$inst' — skipping its disjointness check" >&2
         continue
     fi

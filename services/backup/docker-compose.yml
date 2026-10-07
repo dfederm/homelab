@@ -18,7 +18,7 @@ services:
       # refreshes persist; each target only reads its own remote.
       - ${DOCKER_APPDATA_ROOT}/backup/rclone:/config/rclone:rw
       # Only this target's source directory, read-only.
-      - ${BACKUP_DATA_ROOT}/${BACKUP_SOURCE_DIR}:/data:ro
+      - ${BACKUP_SOURCE_PATH:?Set BACKUP_SOURCE_PATH in each target env file}:/data:ro
       - ./start.sh:/start.sh:ro
       - ./backup.sh:/backup.sh:ro
     entrypoint: ["/bin/sh", "/start.sh"]

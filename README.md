@@ -987,13 +987,19 @@ and add an entry to the BedrockConnect menu file.
 ### Backup (cloud sync)
 
 `services/backup/` is a multi-instance service: each target in `BACKUP_INSTANCES` runs as its
-own `rclone` container (`backup-<target>`) that syncs one read-only source directory under
-`BACKUP_DATA_ROOT` to a cloud destination. Per-target settings — the source subdirectory
-(`BACKUP_SOURCE_DIR`), the rclone destination (`BACKUP_DEST`), and an optional cron schedule
+own `rclone` container (`backup-<target>`) that syncs its read-only source directory
+to a cloud destination. Per-target settings — the absolute source directory on the Docker
+host (`BACKUP_SOURCE_PATH`), the rclone destination (`BACKUP_DEST`), and an optional cron schedule
 (`BACKUP_CRON`) — live in `<config_dir>/backup/<target>.env` (copy
 `services/backup/backup.env.example`). Each container runs the sync once on start and then on
 its cron schedule (default 03:00 daily; stagger `BACKUP_CRON` per target to avoid contention);
 a failed sync exits non-zero and is visible in the container logs.
+
+Every target must set `BACKUP_SOURCE_PATH` to an existing absolute directory. The
+pre-deploy check rejects missing, relative, or nonexistent sources before Compose runs.
+Deploy through `run-service.sh`: running Compose directly bypasses that check and can
+create a missing source directory. Update existing target env files before deploying
+this configuration.
 
 The rclone remotes are defined once in the shared config at `${DOCKER_APPDATA_ROOT}/backup/rclone`,
 mounted read-write so OAuth token refreshes (e.g. OneDrive) persist. Each target reads only its
@@ -1009,11 +1015,12 @@ its files group-writable but not world-readable (so the tokens stay private). rc
 existing config file's owner+mode when it rewrites it, so that admin grant survives token
 rotations — admins can edit `rclone.conf` over SMB without getting locked out.
 
-Adding a target is therefore NAS-only: create its `<target>.env` and add its name to
-`BACKUP_INSTANCES` — no repo change. Its remote must exist in the shared `rclone.conf`; minting a
-OneDrive remote's token is a one-time interactive step (`rclone config` / `rclone config reconnect
-<remote>:` inside the container). On a brand-new config the container first creates `rclone.conf`
-as `root:root`; the next `setup.sh` (i.e. `install-samba`) run normalizes it to admin-editable.
+Adding a target requires its `<target>.env`, an existing source directory on the Docker host,
+and its name in `BACKUP_INSTANCES` — no repo change. Its remote must exist in the shared
+`rclone.conf`; minting a OneDrive remote's token is a one-time interactive step (`rclone config`
+/ `rclone config reconnect <remote>:` inside the container). On a brand-new config the container
+first creates `rclone.conf` as `root:root`; the next `setup.sh` (i.e. `install-samba`) run
+normalizes it to admin-editable.
 Shared folders with no single owner (e.g. `family`, `adults`)
 back up into an existing personal remote under a **separate** top-level path so they don't collide
 with that person's own backup — e.g. a `family` target → `onedrivedavid:/nas-backup-shared/family`
