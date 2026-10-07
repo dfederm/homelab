@@ -50,6 +50,19 @@
       "groupName": "beszel"
     },
     {
+      "description": "SearXNG follows Docker Hub's latest alias through the custom datasource",
+      "matchManagers": [
+        "docker-compose"
+      ],
+      "matchDatasources": [
+        "docker"
+      ],
+      "matchPackageNames": [
+        "searxng/searxng"
+      ],
+      "enabled": false
+    },
+    {
       "description": "Scrutiny only supports InfluxDB 2.x — do not bump to 3.x",
       "matchDatasources": [
         "docker"
@@ -75,7 +88,28 @@
       "/services/.+/docker-compose\\.yml$/"
     ]
   },
+  "customDatasources": {
+    "searxng": {
+      "defaultRegistryUrlTemplate": "https://hub.docker.com/v2/repositories/searxng/searxng/tags?page_size=100&ordering=last_updated",
+      "transformTemplates": [
+        "($latest := results[name = \"latest\"]; $matches := results[name != \"latest\" and digest = $latest[0].digest and $match(name, /^[0-9]{4}\\.[0-9]{1,2}\\.[0-9]{1,2}-[0-9a-f]+$/)]; {\"releases\": $count($latest) = 1 and $count($matches) = 1 and $match($latest[0].digest, /^sha256:[0-9a-f]{64}$/) ? [{\"version\": $matches[0].name, \"digest\": $matches[0].digest}] : []})"
+      ]
+    }
+  },
   "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Update SearXNG to the immutable tag and manifest digest behind latest",
+      "managerFilePatterns": [
+        "/services/ai/docker-compose\\.yml$/"
+      ],
+      "matchStrings": [
+        "image:\\s*searxng/searxng:(?<currentValue>[0-9]{4}\\.[0-9]{1,2}\\.[0-9]{1,2}-[0-9a-f]+)@(?<currentDigest>sha256:[0-9a-f]{64})"
+      ],
+      "depNameTemplate": "searxng/searxng",
+      "datasourceTemplate": "custom.searxng",
+      "versioningTemplate": "regex:^(?<major>[0-9]{4})\\.(?<minor>[0-9]{1,2})\\.(?<patch>[0-9]{1,2})-[0-9a-f]+$"
+    },
     {
       "customType": "regex",
       "description": "Keep the shared pinned shoutrrr CLI version updated via PRs, like the Docker images",
