@@ -158,7 +158,7 @@ apt_get() {
 # HOMELAB_ALERT_SHOUTRRR_URL. Best-effort: callers can continue with syslog-only
 # alerting when GitHub or the release asset is temporarily unavailable.
 # renovate: datasource=github-releases depName=nicholas-fedor/shoutrrr
-SHOUTRRR_VERSION="0.21.1"
+SHOUTRRR_VERSION="0.21.2"
 ensure_shoutrrr() {
     local bin="/usr/local/bin/shoutrrr"
     local marker="/usr/local/bin/.shoutrrr-version"
