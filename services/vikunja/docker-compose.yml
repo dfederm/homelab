@@ -16,7 +16,7 @@ name: vikunja
 services:
   vikunja:
     container_name: vikunja
-    image: vikunja/vikunja:2.6.0@sha256:417ada6f94e81f0267aa2f007d0a811fc82d38dd2aa58351e3ea520ca01c2ea5
+    image: vikunja/vikunja:2.7.0@sha256:e2204a1c1c6a81e833c2b3a5442be182ca2335b54c2e7e37578cc3fe12a27cfc
     restart: unless-stopped
     # The image defaults to UID 1000, but Docker creates the bind-mount source dirs as root, so
     # 1000 couldn't write task attachments. Run as root (like the postgres/forgejo/immich
