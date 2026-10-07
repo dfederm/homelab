@@ -30,7 +30,7 @@ services:
   # route. Configuration stays authoritative in ZFS-backed external YAML rather than the database.
   litellm:
     container_name: litellm
-    image: ghcr.io/berriai/litellm-database:v1.103.1@sha256:b435c9dc6c0fac815762a5d952453f83450d1f8fd3db33929d326d3a4733ab18
+    image: ghcr.io/berriai/litellm-database:v1.104.0@sha256:fbe28229d2d02181c0a7d9df9599de614b491f3d897d2d7da18404f088310218
     restart: unless-stopped
     command: ['--config=/app/config.yaml', '--port=4000']
     depends_on:
