@@ -28,7 +28,7 @@ All data lives on a ZFS pool and is bind-mounted into containers. The LXC root f
 │   ├── recreate-service.sh # Force-recreate a service container
 │   ├── run-all-services.sh
 │   ├── run-service.sh     # Deploy a single Docker Compose service
-│   ├── storage/           # Host-level storage-health scripts (ZFS scrub/health, SMART alert dispatch)
+│   ├── storage/           # Host-level storage scripts (ZFS scrub/health/snapshots, SMART alert dispatch)
 │   ├── storage-space-check.sh # Threshold alerts for thin-pool + ZFS pool capacity
 │   ├── update.sh          # Update system packages on host and all LXCs
 │   └── setup/
@@ -108,6 +108,7 @@ Modules are standalone, idempotent scripts in `scripts/setup/modules/`. Each han
 | `configure-storage-alerts` | Periodic threshold alerts for LVM thin-pool + ZFS pool capacity (the storage Beszel can't see) | Proxmox host |
 | `configure-storage-health` | Schedule monthly ZFS scrubs + daily pool health check + SMART self-tests (smartd), with degradation alerting | Proxmox host |
 | `configure-ups-monitoring` | Configure a USB UPS through NUT, expose telemetry to Home Assistant, and alert on telemetry/UPS health failures | Proxmox host |
+| `configure-zfs-snapshots` | Schedule recursive ZFS snapshots with per-period retention (`ZFS_SNAPSHOT_*`) — the fast local undo for accidental deletes | Proxmox host |
 | `create-lxcs` | Create/update LXC containers from env var definitions (integrated-GPU passthrough via `_GPU=1`, NVIDIA passthrough via `_NVIDIA_GPU=1`, USB via `_USB_DEVICES`) | Proxmox host |
 | `create-vms` | Create/update VMs (e.g. Home Assistant) | Proxmox host |
 | `create-users` | Create Linux users/groups with aligned UIDs across machines | Docker LXC, NAS LXC |
@@ -129,6 +130,7 @@ setup.sh on Proxmox host
     configure-kernel-cmdline, configure-ssh, install-beszel-agent, configure-storage-alerts
   → configure-storage-health (ZFS scrub + SMART self-tests + alerting), configure-scrutiny-collector
   → configure-ups-monitoring (NUT telemetry + UPS health alerting)
+  → configure-zfs-snapshots (scheduled recursive snapshots + retention)
   → configure-lxc-fstrim (periodic thin-pool reclaim for LXC rootfs)
   → configure-nvidia-driver (NVIDIA driver + device nodes)
   → provision-host-volumes (dedicated fast-NVMe volumes, e.g. the AI model store)
@@ -336,6 +338,43 @@ var (`ZFS_SCRUB_SCHEDULE`, `ZFS_HEALTH_CHECK_SCHEDULE`, `SMART_SELFTEST_SCHEDULE
 `SCRUTINY_COLLECTOR_SCHEDULE`). `.env.template` ships recommended defaults; **clear a value
 (set it empty) to disable that specific feature** — the module then removes the
 corresponding timer. (smartd still runs for monitoring even with self-tests disabled.)
+
+### ZFS Snapshots
+
+**`configure-zfs-snapshots`** (Proxmox host) takes recursive snapshots of
+`ZFS_SNAPSHOT_DATASETS` on hourly / daily / monthly timers, each with its own retention
+count. Same schedule semantics as above: clear a period's schedule to disable it.
+
+Snapshots and the cloud backup solve *different* problems, which is why both exist:
+
+| | Snapshots | Cloud backup |
+|---|---|---|
+| Recovers from | accidental delete, bad edit, bad upgrade | pool loss, fire, theft, ransomware |
+| Recovery time | seconds (a file copy) | hours to days (download) |
+| Survives pool loss | **no** | yes |
+
+A snapshot is not a backup — it lives on the pool it protects. It *is* by far the fastest
+answer to the most common failure, so it complements rather than replaces the offsite copy.
+
+Restoring is a plain file copy out of the hidden per-dataset snapshot directory — no
+`zfs rollback`, no downtime, and it can't clobber newer files:
+
+```bash
+ls /<mountpoint>/.zfs/snapshot/                                  # what's available
+cp -a /<mountpoint>/.zfs/snapshot/homelab-hourly-<ts>/path/to/file /<mountpoint>/path/to/
+```
+
+Snapshots are named `homelab-<period>-<UTC timestamp>`, and pruning only ever considers
+that prefix — **a snapshot you took by hand is never destroyed by the timer**. Take one
+before risky work and it survives until you remove it:
+
+```bash
+zfs snapshot -r <pool>/<dataset>@manual-before-<whatever>
+```
+
+Retention defaults (48 hourly / 30 daily / 12 monthly) are set by snapshot **count**, not
+capacity: a large pool has ample room, but every snapshot lengthens `zfs list -t snapshot`
+and scrub bookkeeping. Timestamps are UTC so names stay unique and sortable across DST.
 
 ## UPS Monitoring
 
