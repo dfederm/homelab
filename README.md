@@ -1064,9 +1064,35 @@ Shared folders with no single owner (e.g. `family`, `adults`)
 back up into an existing personal remote under a **separate** top-level path so they don't collide
 with that person's own backup — e.g. a `family` target → `onedrivedavid:/nas-backup-shared/family`
 while david's own backup stays at `onedrivedavid:/nas-backup`. This is enforced, not just advisory:
-`run-service.sh` runs `services/backup/pre-up.sh` before deploying and **aborts** if any two
-targets' destinations overlap on the same remote (an equal or ancestor path would let one target's
-pruning sync delete another's backup).
+`run-service.sh` runs `services/backup/pre-up.sh` before deploying and **aborts**
+if any two targets' destinations overlap on the same remote (an equal or ancestor path would let
+one target's pruning sync delete another's backup). `BACKUP_ARCHIVE_DEST` paths are checked the
+same way.
+
+#### Surviving the sync itself
+
+`rclone sync` mirrors, so by default the backup faithfully reproduces whatever just happened to
+the source — including a corruption, a ransomware run, or a deletion. Three per-target options
+exist to stop the backup being destroyed by the event it exists for:
+
+- **`BACKUP_ARCHIVE_DEST`** (rclone `--backup-dir`) — files the sync is about to overwrite or
+  delete are moved aside on the remote instead of destroyed. The move is server-side, so this
+  costs no extra upload. Note the archive is itself a mirror path, so it holds **the most recent
+  superseded copy of each file, not a full version history**: a file replaced on two consecutive
+  nights leaves only the night-2 copy in the archive. That is bounded in size and enough to
+  survive "last night's sync propagated the damage"; if you want more generations, point
+  `BACKUP_ARCHIVE_DEST` at a dated path and prune it yourself. It must be on the same remote as
+  `BACKUP_DEST` (rclone's requirement) and disjoint from every target's destination — `pre-up.sh`
+  checks both.
+- **`BACKUP_HEARTBEAT_URL`** — pinged only after a *successful* sync, so a monitor that expects it
+  on a schedule catches both a failing sync and the failure container logs can't show: a backup
+  that silently stopped running. ⚠️ Point this at a monitor that does **not** run on this lab —
+  a dead-man's switch hosted on the machine it watches goes quiet for the same reasons the backup
+  did, and reports nothing. (Same reasoning as the infra alarm channel, which is deliberately
+  off-box.)
+- **`BACKUP_REQUIRE_ENCRYPTION=true`** — the sync refuses to run unless `BACKUP_DEST` resolves to
+  an rclone `crypt` remote. Set it on any target whose source holds secrets. With a crypt remote
+  the **password is the backup**: store it somewhere that survives losing the lab.
 
 ## Env Files
 

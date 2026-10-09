@@ -13,6 +13,16 @@ services:
       - BACKUP_DEST=${BACKUP_DEST}
       # Optional cron schedule; start.sh defaults to "0 3 * * *" when unset.
       - BACKUP_CRON=${BACKUP_CRON:-}
+      # Optional remote path that files replaced/deleted by the mirroring sync are
+      # moved to instead of being destroyed (rclone --backup-dir).
+      - BACKUP_ARCHIVE_DEST=${BACKUP_ARCHIVE_DEST:-}
+      # Optional space-separated rclone filter patterns to skip.
+      - BACKUP_EXCLUDE=${BACKUP_EXCLUDE:-}
+      # Optional "true" to refuse the sync unless BACKUP_DEST is a crypt remote.
+      - BACKUP_REQUIRE_ENCRYPTION=${BACKUP_REQUIRE_ENCRYPTION:-}
+      # Optional URL pinged after a successful sync (a dead-man's-switch monitor, hosted
+      # OFF this lab), so a backup that fails — or silently stops running — is noticed.
+      - BACKUP_HEARTBEAT_URL=${BACKUP_HEARTBEAT_URL:-}
     volumes:
       # Shared rclone config (all remotes). Read-write so OneDrive OAuth token
       # refreshes persist; each target only reads its own remote.
