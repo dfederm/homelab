@@ -311,6 +311,28 @@ merge_cmdline_params() {
     echo "${tokens[*]}"
 }
 
+# Log every alert locally, even when the shared Shoutrrr channel is unconfigured.
+# A configured channel that cannot send returns non-zero so callers can retry.
+send_alert() {
+    local title="$1" message="$2" tag="${3:-homelab-alert}"
+
+    logger -t "$tag" "$message" 2>/dev/null || true
+    echo "ALERT: $message"
+
+    if [ -z "${HOMELAB_ALERT_SHOUTRRR_URL:-}" ]; then
+        return 0
+    fi
+    if ! command -v shoutrrr &>/dev/null; then
+        echo "  WARNING: HOMELAB_ALERT_SHOUTRRR_URL is set but shoutrrr is unavailable" >&2
+        return 1
+    fi
+    if ! shoutrrr send --url "$HOMELAB_ALERT_SHOUTRRR_URL" \
+        --title "$title" --message "$message"; then
+        echo "  WARNING: shoutrrr send failed" >&2
+        return 1
+    fi
+}
+
 # Resolve the env file and config directory, then source common.env
 # (shared vars) followed by the machine-specific env file (overrides).
 # Creates /etc/homelab.env symlink so future runs need no arguments.

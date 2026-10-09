@@ -19,7 +19,7 @@
 #   STORAGE_ALERT_THINPOOL_PERCENT    - thin-pool data% alert threshold (default 80)
 #   STORAGE_ALERT_ZPOOL_PERCENT       - zpool capacity% alert threshold (default 85)
 #   STORAGE_ALERT_COOLDOWN_HOURS      - min hours between repeat alerts (default 12)
-#   HOMELAB_ALERT_SHOUTRRR_URL        - shared alert channel (see notify(); stub)
+#   HOMELAB_ALERT_SHOUTRRR_URL        - shared alert channel (see send_alert in lib.sh)
 
 set -euo pipefail
 
@@ -60,31 +60,11 @@ notify() {
         fi
     fi
 
-    local full="$title - $body"
-    logger -t homelab-storage-alert "$full" 2>/dev/null || true
-    echo "ALERT: $full"
-
-    # --- Alert delivery via the shared Shoutrrr channel (backend: Pushover) ---
-    # HOMELAB_ALERT_SHOUTRRR_URL (common.env) is the ONE channel shared with the
-    # Beszel hub and scrutiny. Backend is Pushover:
-    #   pushover://shoutrrr:<APP_TOKEN>@<USER_KEY>/
-    # The shoutrrr CLI (installed by the configure-storage-alerts module) sends it.
-    # If the URL is unset (not yet configured) the alert is logged to syslog only -
-    # a safe no-op - so the check is harmless before Pushover credentials are set.
-    if [ -n "${HOMELAB_ALERT_SHOUTRRR_URL:-}" ]; then
-        if command -v shoutrrr &>/dev/null; then
-            if shoutrrr send --url "$HOMELAB_ALERT_SHOUTRRR_URL" \
-                --title "homelab storage" --message "$full"; then
-                echo "$now" > "$stamp"
-            else
-                echo "  WARNING: shoutrrr send failed; will retry next run" >&2
-            fi
-            return 0
-        fi
-        echo "  WARNING: HOMELAB_ALERT_SHOUTRRR_URL set but 'shoutrrr' CLI missing; logged only" >&2
+    if send_alert "homelab storage" "$title - $body" "homelab-storage-alert"; then
+        echo "$now" > "$stamp"
+    else
+        echo "  WARNING: alert delivery failed; will retry next run" >&2
     fi
-    # Stub path: record the alert time so syslog isn't spammed every run either.
-    echo "$now" > "$stamp"
 }
 
 echo "=== Storage space check: $(hostname) $(date '+%Y-%m-%d %H:%M:%S') ==="
