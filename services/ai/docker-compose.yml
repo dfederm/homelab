@@ -206,7 +206,7 @@ services:
   # http://searxng:8080.
   searxng:
     container_name: searxng
-    image: searxng/searxng:2026.10.9-9f042d2f6@sha256:5903efa50bc6b99293fa059f7a0ff37eddd910210196af77d02e5536ccdfb387
+    image: searxng/searxng:2026.10.13-22c64b8d3@sha256:9b61996edcc679fb6665290f95fda15389a14eda6060e41a25c63ab2758f2436
     restart: unless-stopped
     environment:
       - TZ=${TZ}
