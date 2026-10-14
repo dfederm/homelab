@@ -1,7 +1,7 @@
 services:
   caddy:
     container_name: caddy
-    image: caddy:2.11.7@sha256:f2a1290d0463aad60660d4ec134943f183ee2a5f6c3eb7bf32dd984f2f020772
+    image: caddy:2.11.7@sha256:685ae3d7c34d9b5f8caeddc5d14051db7bbd88ff1f5a2fa0c16bd8ca328fb7af
     # Use "always" instead of "unless-stopped" so the reverse proxy
     # is never accidentally left down after a reboot.
     restart: always
