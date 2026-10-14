@@ -969,12 +969,27 @@ only a new per-instance env file plus its name in the list — no repo change.
 ### Minecraft (multiple Bedrock worlds)
 
 `services/minecraft/` is a multi-instance service: each world in `MINECRAFT_INSTANCES`
-runs as its own Bedrock server (`minecraft-<world>`) with its own UDP port and ZFS-backed
-`/data` (`${DOCKER_APPDATA_ROOT}/minecraft/<world>`). Per-world settings (port, game mode,
-difficulty, …) live in `<config_dir>/minecraft/<world>.env` (copy
+runs as its own Bedrock server (`minecraft-<world>`) with its own TCP signaling port,
+UDP gameplay range, and ZFS-backed `/data` (`${DOCKER_APPDATA_ROOT}/minecraft/<world>`).
+Per-world settings (ports, game mode, difficulty, …) live in
+`<config_dir>/minecraft/<world>.env` (copy
 `services/minecraft/world.env.example`); gamerules such as
 `keepInventory` go in `<config_dir>/minecraft/<world>.init` (one command per line) and are
 applied automatically after start (see `services/minecraft/post-up.sh`).
+
+Bedrock Dedicated Server 1.26.50+ documents NetherNet as its default. Current
+releases warn that the older transport is unsupported, though existing worlds
+may still accept legacy UDP connections. The Compose service explicitly sets
+`TRANSPORT=nethernet` rather than relying on that compatibility. Set
+`MINECRAFT_PORT` to each world's unique TCP signaling port, and set
+`MINECRAFT_UDP_PORT_RANGE` to a distinct UDP gameplay range with at least one
+port per player (the default maximum is 10).
+The Compose service publishes both and advertises the existing `DOCKER_HOST_IP` to
+clients, so that address must be reachable from their LAN. Configure **every**
+per-world env file with a non-overlapping range before redeploying. BedrockConnect's
+menu remains on UDP 19132; its world entries retain the same address and
+`MINECRAFT_PORT`. Confirm console transfers into each world after deployment.
+These ports are for LAN play, not internet forwarding.
 
 Game consoles can't enter an arbitrary server IP, so `services/bedrock-connect/` runs
 [BedrockConnect](https://github.com/Pugmatt/BedrockConnect): point an AdGuard DNS rewrite of

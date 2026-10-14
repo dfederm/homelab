@@ -22,10 +22,12 @@ services:
       - ALLOW_LIST=${MINECRAFT_ALLOW_LIST}
       - ALLOW_LIST_USERS=${MINECRAFT_ALLOW_LIST_USERS}
       - OPS=${MINECRAFT_OPS}
-    # Each world publishes its own UDP port on the Docker host. Consoles don't dial
-    # this directly — BedrockConnect transfers them here from its menu — so the port
-    # can differ per world (only BedrockConnect must stay on the fixed 19132).
+      - TRANSPORT=nethernet
+      - SERVER_UDP_PORTS=${DOCKER_HOST_IP:?DOCKER_HOST_IP required}:${MINECRAFT_UDP_PORT_RANGE:?MINECRAFT_UDP_PORT_RANGE required}:${MINECRAFT_UDP_PORT_RANGE:?MINECRAFT_UDP_PORT_RANGE required}
+    # BedrockConnect keeps UDP 19132 for its menu. Each world needs TCP signaling
+    # on its own host port and a separate, advertised UDP range for gameplay.
     ports:
-      - '${MINECRAFT_PORT}:19132/udp'
+      - '${MINECRAFT_PORT:?MINECRAFT_PORT required}:19132/tcp'
+      - '${MINECRAFT_UDP_PORT_RANGE:?MINECRAFT_UDP_PORT_RANGE required}:${MINECRAFT_UDP_PORT_RANGE:?MINECRAFT_UDP_PORT_RANGE required}/udp'
     volumes:
       - ${DOCKER_APPDATA_ROOT}/minecraft/${MINECRAFT_INSTANCE}:/data
