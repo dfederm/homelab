@@ -1,26 +1,9 @@
 #!/bin/bash
 # Module: configure-kernel-cmdline
 #
-# Ensures the kernel command-line parameters this machine needs
-# (KERNEL_CMDLINE_PARAMS) are present in the bootloader config, so they survive
-# a re-pave instead of living on as a hand-edit nobody remembers.
-#
-# Where the command line lives depends on how the host boots, so it is detected
-# rather than assumed. proxmox-boot-tool reports what kind of entries each ESP
-# holds: systemd-boot ("uefi") and unified-kernel-image ("uki") entries take the
-# command line from /etc/kernel/cmdline, while grub-on-ESP entries are generated
-# by update-grub and take it from GRUB_CMDLINE_LINUX_DEFAULT in
-# /etc/default/grub. A host can have both kinds, so both files may need
-# managing; `proxmox-boot-tool refresh` regenerates either. A host that
-# proxmox-boot-tool doesn't manage is a plain GRUB install, refreshed with
-# `update-grub`. An unrecognized bootloader is an error, not a silent no-op.
-#
-# On the GRUB side only GRUB_CMDLINE_LINUX_DEFAULT is managed. GRUB appends it
-# after GRUB_CMDLINE_LINUX on the default boot entry, so it wins on any key the
-# two both set.
-#
-# Parameters only take effect on the next boot, and this module never reboots —
-# it reports whether one is still pending.
+# Detect bootloader type: Proxmox systemd-boot/UKI uses /etc/kernel/cmdline;
+# GRUB uses GRUB_CMDLINE_LINUX_DEFAULT. Mixed ESPs need both. A changed
+# command line takes effect after reboot; this module only reports it.
 #
 # Env vars:
 #   REPO_DIR              (required, set by setup.sh) repo path on this host

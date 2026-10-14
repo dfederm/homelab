@@ -1,11 +1,6 @@
 #!/bin/bash
-# Shared helper functions for homelab scripts.
-# Source this file; do not execute directly.
+# Shared helpers; source rather than execute.
 
-# Validate that all named env vars are set and non-empty.
-# Supports indirect variable names (e.g. dynamically constructed names).
-#
-# Usage: validate_env "MY_VAR" "OTHER_VAR"
 validate_env() {
     for var in "$@"; do
         if [ -z "${!var:-}" ]; then
@@ -69,42 +64,11 @@ configure_system_timezone() {
     echo "System timezone updated: $timezone"
 }
 
-# Run apt-get, waiting out another process that holds an apt lock.
-#
-# Do not "simplify" this into `-o DPkg::Lock::Timeout=N`. That option is read
-# only by debSystem::Lock(), which guards the dpkg locks. The lists lock
-# (/var/lib/apt/lists/lock, taken by `update`) and the archives lock
-# (/var/cache/apt/archives/lock, taken by `install`) are both acquired by
-# pkgAcquire::GetLock() via a non-blocking fcntl(F_SETLK) that fails instantly
-# and consults no configuration. apt has never shipped an option that makes
-# those two wait, so the waiting has to happen out here. The option is still
-# passed below, since it does cover the dpkg half of an install — with the
-# caveat that apt then does that wait internally, so a dpkg-lock collision is
-# absorbed silently rather than reported by the retry notices below.
-#
-# This matters because a Proxmox host runs several randomized apt-touching
-# timers (apt-daily, apt-daily-upgrade, pve-daily-update), and pve-daily-update
-# is Persistent=yes — a window missed while the machine was off is caught up
-# shortly after boot, which is exactly when a rebuild deploy tends to run. A
-# collision of a few seconds is enough to abort the whole setup cascade.
-#
-# apt-get exits 100 for every failure, so the exit status says nothing about
-# whether waiting would help. Retrying is gated on apt's contention messages
-# instead. Note the deliberately narrow match: "Unable to lock directory" is NOT
-# one of them, because apt emits it for a permission error too, and retrying
-# that would spend the whole budget hiding a real fault.
-#
-# stdout is left alone, so callers keep whatever redirection they already had.
-# stderr is captured to match against, then replayed — including on success, so
-# apt warnings still reach the journal. Retry notices go to stderr as well,
-# since callers routinely send this function's stdout to /dev/null.
-#
-# Env vars:
-#   APT_LOCK_TIMEOUT  (optional, default 120) seconds to keep retrying for. It
-#                     bounds when the last retry may *start*, so a run can
-#                     overshoot it by one backoff interval.
-#
-# Usage: apt_get install -y -qq curl > /dev/null
+# DPkg::Lock::Timeout waits on dpkg locks, not apt's lists/archives locks.
+# Retry only known lock-contention messages (apt returns 100 for other errors
+# too). "Unable to lock directory" may mean a permission error, so never
+# retry it. Replay stderr even on success to preserve apt warnings.
+# APT_LOCK_TIMEOUT (default 120) bounds when the last retry starts.
 apt_get() {
     local timeout="${APT_LOCK_TIMEOUT:-120}"
     if ! [[ "$timeout" =~ ^[0-9]+$ ]]; then

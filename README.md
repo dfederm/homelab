@@ -13,51 +13,6 @@ The primary server runs Proxmox with LXC containers and VMs. Additional machines
 
 All data lives on a ZFS pool and is bind-mounted into containers. The LXC root filesystems are ephemeral — destroy and recreate from this repo at any time.
 
-## Directory Structure
-
-```
-├── .env.template          # Template for machine-specific config
-├── nas/
-│   └── smb.conf.global    # Samba [global] config (shares are generated)
-├── renovate.json          # Automated Docker image update config
-├── scripts/
-│   ├── backup/            # Database and volume backup scripts
-│   ├── bootstrap-remote.sh # Bootstrap a new non-LXC machine (SMB mount + first setup)
-│   ├── deploy.sh          # Deploy changes on this machine (pull + setup)
-│   ├── lib.sh             # Shared helper functions (sourced by other scripts)
-│   ├── recreate-service.sh # Force-recreate a service container
-│   ├── run-all-services.sh
-│   ├── run-service.sh     # Deploy a single Docker Compose service
-│   ├── storage/           # Host-level storage-health scripts (ZFS scrub/health, SMART alert dispatch)
-│   ├── storage-space-check.sh # Threshold alerts for thin-pool + ZFS pool capacity
-│   ├── update.sh          # Update system packages on host and all LXCs
-│   └── setup/
-│       ├── setup.sh       # Main setup runner (see below)
-│       └── modules/       # Idempotent setup modules
-└── services/              # Docker Compose service definitions
-    ├── ai/               # llama-swap + LiteLLM + Open WebUI + SearXNG + Athena MCP
-    ├── authelia/          # Single sign-on / OIDC identity provider
-    ├── backup/            # Rclone cloud backup
-    ├── bedrock-connect/   # Console server-list menu (BedrockConnect) for Minecraft
-    ├── dns/               # AdGuard Home
-    ├── dozzle/            # Docker log viewer
-    ├── files/             # Filestash + Collabora
-    ├── forgejo/           # Forgejo git hosting + Actions CI runner
-    ├── homepage/          # Landing page dashboard
-    ├── jellyfin/          # Media streaming
-    ├── koffan/            # Shared shopping list (local-first PWA)
-    ├── minecraft/         # Minecraft Bedrock servers (multi-world)
-    ├── monitoring/        # Beszel hub + Uptime Kuma
-    ├── monitoring-agent/  # Beszel agent (runs on all hosts)
-    ├── photos/            # Immich
-    ├── radicale/          # CalDAV/CardDAV (calendar + contacts)
-    ├── reverse-proxy/     # Caddy
-    ├── scrutiny/          # Drive SMART health (web UI + InfluxDB)
-    ├── vikunja/           # Vikunja task management (+ Postgres)
-    ├── webhook/           # CI/CD webhook receiver and target dispatcher
-    └── zwave/             # Z-Wave JS UI
-```
-
 ## Setup System
 
 The setup system is designed so that a single command on the Proxmox host bootstraps or updates the entire stack — host config, LXC creation, software installation inside each container, and service deployment.
@@ -93,21 +48,21 @@ Modules are standalone, idempotent scripts in `scripts/setup/modules/`. Each han
 |--------|---------|-----------------|
 | `configure-amdgpu` | Load AMD GPU kernel driver for hardware transcoding | Proxmox host |
 | `configure-deploy-worker` | Install target-local signal coalescing, serialized setup, and periodic Git reconciliation | Proxmox host, remote machines |
-| `configure-kernel-cmdline` | Ensure the kernel parameters this machine needs (`KERNEL_CMDLINE_PARAMS`, e.g. `iommu=pt`) are set in whichever bootloader config the host actually boots from (`/etc/kernel/cmdline` or `/etc/default/grub`). Never reboots; reports when one is pending | Proxmox host |
+| `configure-kernel-cmdline` | Reconcile boot parameters; report pending reboot without performing one | Proxmox host |
 | `configure-pi-kiosk` | Set up Cage + Chromium kiosk browser pointing at a URL (Raspberry Pi specific) | Alarm panel Pi |
 | `configure-scrutiny-collector` | Install Scrutiny SMART collector (pinned binary) + timer; pushes drive health to the Scrutiny web UI | Proxmox host |
 | `configure-macvlan-bridge` | Persist macvlan bridge so host can reach macvlan containers | Docker LXC |
 | `configure-network` | Pin a machine to a static IPv4 address (`STATIC_IP`) via NetworkManager | Remote machines |
-| [`configure-nvidia-driver`](scripts/setup/modules/configure-nvidia-driver.md) | Install the NVIDIA driver from NVIDIA's CUDA apt repo (open kernel modules via DKMS, headless userspace only), blacklist the in-tree drivers, and create the device nodes + persistence + optional power cap (`NVIDIA_POWER_LIMIT_WATTS`) at boot before guests start. Verifies DKMS actually built for the running kernel; never reboots, reports when one is pending. The companion runbook defines the approval-gated measurement, apply, verification, and rollback path | Proxmox host |
+| [`configure-nvidia-driver`](scripts/setup/modules/configure-nvidia-driver.md) | Install the headless NVIDIA driver, device nodes, and optional power cap; see the linked runbook for safe tuning | Proxmox host |
 | `configure-proxmox-repos` | Switch from paid enterprise repos to free community repos | Proxmox host |
-| `configure-sensors` | Install lm-sensors and persist the hwmon kernel modules for the board's Super I/O chip (`SENSORS_KERNEL_MODULES`), so fan speeds and board temperatures are readable | Bare-metal hosts |
+| `configure-sensors` | Install sensors and load board-specific hwmon modules | Bare-metal hosts |
 | `configure-smb-mount` | Mount NAS share via CIFS, persist in fstab | Remote machines |
-| `configure-lxc-fstrim` | Scheduled `pct fstrim` of LXC rootfs volumes (`LXC_FSTRIM_SCHEDULE`) so blocks freed inside containers return to the LVM thin pool | Proxmox host |
-| `configure-docker-image-prune` | Scheduled removal of Docker images no container references (`DOCKER_IMAGE_PRUNE_SCHEDULE`), reclaiming the superseded images left behind by digest bumps | Docker LXC |
+| `configure-lxc-fstrim` | Return freed LXC rootfs blocks to the LVM thin pool | Proxmox host |
+| `configure-docker-image-prune` | Prune images unused by any container | Docker LXC |
 | `configure-ssh` | Harden SSH (key-only auth) and deploy authorized keys | All machines |
 | `configure-storage-alerts` | Periodic threshold alerts for LVM thin-pool + ZFS pool capacity (the storage Beszel can't see) | Proxmox host |
 | `configure-storage-health` | Schedule monthly ZFS scrubs + daily pool health check + SMART self-tests (smartd), with degradation alerting | Proxmox host |
-| `configure-ups-monitoring` | Configure a USB UPS through NUT, expose telemetry to Home Assistant, and alert on telemetry/UPS health failures | Proxmox host |
+| `configure-ups-monitoring` | Monitor UPS health and expose NUT telemetry | Proxmox host |
 | `create-lxcs` | Create/update LXC containers from env var definitions (integrated-GPU passthrough via `_GPU=1`, NVIDIA passthrough via `_NVIDIA_GPU=1`, USB via `_USB_DEVICES`) | Proxmox host |
 | `create-vms` | Create/update VMs (e.g. Home Assistant) | Proxmox host |
 | `create-users` | Create Linux users/groups with aligned UIDs across machines | Docker LXC, NAS LXC |
@@ -116,31 +71,19 @@ Modules are standalone, idempotent scripts in `scripts/setup/modules/`. Each han
 | `install-nvidia-container-toolkit` | Install the userspace NVIDIA driver (matching the host's `NVIDIA_DRIVER_VERSION`) plus the NVIDIA Container Toolkit, so Docker containers can use GPUs passed into the LXC | Docker LXC |
 | `install-samba` | Install Samba, generate smb.conf from env vars | NAS LXC |
 | `install-tools` | Install common utilities (git, jq, htop, curl) | All machines |
-| `provision-host-volumes` | Carve dedicated LVM-thin volumes out of the boot SSD's thin pool and mount them (`HOMELAB_HOST_VOLUMES`), e.g. a fast-NVMe AI model store bind-mounted into the Docker LXC | Proxmox host |
+| `provision-host-volumes` | Provision host LVM-thin volumes for LXC bind mounts | Proxmox host |
 | `set-share-permissions` | Apply POSIX ACLs on file share directories | NAS LXC |
 
 ### Cascade
 
-The `create-lxcs` module doesn't just create containers — after creation, it runs `setup.sh` inside each LXC via `pct exec`. This means:
+After creating each LXC, `create-lxcs` runs `setup.sh` inside it via `pct exec`:
 
 ```
 setup.sh on Proxmox host
-  → configure-deploy-worker, configure-proxmox-repos, install-tools, configure-amdgpu, configure-sensors,
-    configure-kernel-cmdline, configure-ssh, install-beszel-agent, configure-storage-alerts
-  → configure-storage-health (ZFS scrub + SMART self-tests + alerting), configure-scrutiny-collector
-  → configure-ups-monitoring (NUT telemetry + UPS health alerting)
-  → configure-lxc-fstrim (periodic thin-pool reclaim for LXC rootfs)
-  → configure-nvidia-driver (NVIDIA driver + device nodes)
-  → provision-host-volumes (dedicated fast-NVMe volumes, e.g. the AI model store)
+  → host modules (including GPU drivers before guest creation)
   → create-lxcs
-    → creates Docker LXC (GPU passthrough if _GPU=1, NVIDIA if _NVIDIA_GPU=1), then runs setup.sh inside it
-      → create-users, install-tools, configure-ssh, install-docker, configure-macvlan-bridge,
-        install-nvidia-container-toolkit
-      → configure-docker-image-prune (periodic removal of unreferenced Docker images)
-      → deploys HOMELAB_SERVICES (Jellyfin, Immich, Caddy, Scrutiny, monitoring, monitoring-agent, etc.)
-    → creates NAS LXC, then runs setup.sh inside it
-      → create-users, install-tools, configure-ssh, install-samba, set-share-permissions,
-        install-beszel-agent
+    → Docker LXC: setup modules → HOMELAB_SERVICES
+    → NAS LXC: setup modules (including Samba)
   → create-vms (Home Assistant)
 ```
 
@@ -148,8 +91,6 @@ Module order matters. `configure-nvidia-driver` must come before `create-lxcs`, 
 same reason `configure-amdgpu` does: a passthrough step can only pass device nodes that
 already exist. Inside the LXC, `install-nvidia-container-toolkit` and
 `configure-docker-image-prune` must both come after `install-docker`.
-
-One command. Everything configured.
 
 The Proxmox host and NAS LXC don't run Docker, so they get the Beszel monitoring
 agent natively (`install-beszel-agent`) instead of the `monitoring-agent` Docker
@@ -298,44 +239,18 @@ smbpasswd -a <username>
 
 ## Storage Health
 
-The ZFS pool and physical drives are owned by the **Proxmox host** (bare metal), so
-scrubs and drive SMART tests are host-level concerns, configured by setup modules and
-run via systemd timers:
+The Proxmox host owns the disks. `configure-storage-health` schedules monthly ZFS
+scrubs, daily pool checks, and daily short/monthly long SMART self-tests; smartd
+also monitors drive health. `configure-scrutiny-collector` reads SMART data on the
+host and sends it to the LAN-only `services/scrutiny/` dashboard on the Docker
+host; smartd alone schedules the tests. The collector's verified binary version
+follows the Scrutiny image tag.
 
-- **`configure-storage-health`** (Proxmox host):
-  - **Monthly ZFS scrub** of `ZFS_POOL` (first Sunday by default) — `zpool scrub -w`
-    followed by an error check. Monthly is the safe cadence for spinning disks.
-  - **Daily ZFS pool health check** — catches degraded/faulted vdevs and data errors
-    between scrubs.
-  - **SMART self-tests via smartd** on all drives — short daily, long monthly — plus
-    drive-attribute/health monitoring (reallocated/pending sectors, failing self-test,
-    temperature). smartd logs any degradation to syslog/journal. (Long tests are slow on
-    large drives — tens of hours on a multi-TB drive — so the default cadence is monthly,
-    not weekly.)
-
-- **Scrutiny** (web UI + SMART history) is split to fit the architecture:
-  - **`services/scrutiny/`** (Docker host) — the web UI + InfluxDB backend (no disk
-    access needed). LAN-only dashboard (accessed by `DOCKER_HOST_IP:SCRUTINY_WEB_PORT`,
-    not exposed via Caddy), like Beszel / Uptime Kuma / Dozzle.
-  - **`configure-scrutiny-collector`** (Proxmox host) — the collector runs where the
-    physical disks are, as a binary on a timer, and POSTs SMART data to the web UI. It
-    only *reads* SMART data; smartd owns self-test *scheduling*, so the two never
-    double-schedule tests. The collector **version is derived from the `scrutiny` web
-    image tag** in `services/scrutiny/docker-compose.yml` (the single source Renovate
-    bumps) and the downloaded binary is verified against GitHub's published sha256 digest
-    — so a Renovate web-image bump carries the collector automatically, with no second
-    version/checksum to keep in lockstep.
-
-Failures are delivered through the shared `HOMELAB_ALERT_SHOUTRRR_URL` channel (Pushover
-in the current deployment) where the component supports it, with systemd/journal logging
-as the fallback. Scrutiny uses the URL directly; the host-side checks use the pinned
-Shoutrrr CLI installed by the setup modules.
-
-**Schedules are opt-out per feature.** Each scheduled task is gated by its schedule env
-var (`ZFS_SCRUB_SCHEDULE`, `ZFS_HEALTH_CHECK_SCHEDULE`, `SMART_SELFTEST_SCHEDULE`,
-`SCRUTINY_COLLECTOR_SCHEDULE`). `.env.template` ships recommended defaults; **clear a value
-(set it empty) to disable that specific feature** — the module then removes the
-corresponding timer. (smartd still runs for monitoring even with self-tests disabled.)
+Clear any of `ZFS_SCRUB_SCHEDULE`, `ZFS_HEALTH_CHECK_SCHEDULE`,
+`SMART_SELFTEST_SCHEDULE`, or `SCRUTINY_COLLECTOR_SCHEDULE` to disable that
+schedule (smartd still monitors drives without scheduled tests).
+`HOMELAB_ALERT_SHOUTRRR_URL` is the shared alert channel; host checks also log
+to the journal.
 
 ## UPS Monitoring
 
@@ -418,35 +333,13 @@ HOMELAB_SERVICES=dns,reverse-proxy,jellyfin,photos,files,monitoring,homepage,doz
 
 ### Authelia (SSO)
 
-`services/authelia/` runs [Authelia](https://www.authelia.com) as the homelab's **single sign-on /
-identity provider**, giving the family one login for the services that support it and letting admin
-surfaces sit behind 2FA. It integrates two ways:
-
-- **OpenID Connect (OIDC)** — Authelia is an OIDC provider; apps that speak OIDC (Open WebUI,
-  Forgejo, Immich, Vikunja, Miniflux, …) redirect their login to it. This also works for those
-  apps' native/mobile clients, so it's preferred wherever supported.
-- **forward-auth** — Caddy can gate a browser-only web UI (e.g. an admin dashboard) by delegating
-  the auth decision to Authelia.
-
-**[Open WebUI](#ai-llama-swap--litellm--open-webui) is wired via OIDC**, keeping its local
-login as break-glass. Some services deliberately stay on their **own** auth because SSO breaks their
-native clients — Jellyfin (TV/mobile apps), Home Assistant (companion app), Radicale (CalDAV Basic
-auth) — which also makes them accidental break-glass access if Authelia is down.
-
-Config is declarative: `services/authelia/configuration.yml` is committed and mounted read-only
-(like the Caddyfile), carrying **no secrets and no personal domains**. Scalar secrets come from
-`AUTHELIA_*` env vars; personal values (domains, the OIDC issuer key) are injected at load time by
-Authelia's `template` config filter. The file user backend (`users.yml`) and the OIDC issuer key are
-secrets kept on the NAS at `${CONFIG_DIR}/authelia/`, never in this repo. Authelia's own state — the
-SQLite DB of TOTP enrollments + user preferences, and the filesystem notifier file — persists on
-`${DOCKER_APPDATA_ROOT}/authelia` (ZFS-backed). Sessions are stored **in-memory** (no Redis): the
-only cost is re-login after an Authelia restart; 2FA enrollments persist in SQLite regardless.
-
-Caddy proxies `AUTHELIA_FQDN` to the container (`localhost:${AUTHELIA_HTTP_PORT}`); wildcard DNS
-already resolves the host, so only the Caddy site block is needed. Deploy by adding `authelia` to
-`HOMELAB_SERVICES`. **First-run setup (secrets, `users.yml`, the OIDC issuer key, the client-secret
-pair) and the reusable per-app OIDC / forward-auth recipes are documented in
-[`services/authelia/README.md`](services/authelia/README.md).**
+Authelia provides OIDC for apps with native clients (including Open WebUI) and
+Caddy forward-auth for browser-only UIs. Jellyfin, Home Assistant, and Radicale
+retain their own authentication because their native clients cannot use
+forward-auth. Secrets and user records live outside the repo; persistent 2FA
+state is ZFS-backed, but sessions are in memory and require re-login after a
+restart. See [`services/authelia/README.md`](services/authelia/README.md) for
+first-run setup and integration recipes.
 
 ### AI (llama-swap + LiteLLM + Open WebUI)
 
@@ -571,55 +464,26 @@ Open WebUI's native **web search** is disabled; Athena MCP exposes bounded `web_
 
 ### Web search (SearXNG)
 
-The `services/ai/` stack also runs [SearXNG](https://docs.searxng.org), a self-hosted
-metasearch engine, as the homelab's **private web-search backend**. It backs Athena MCP's
-`web_search` tool without relying on Open WebUI's scraping-based, rate-limit-prone DuckDuckGo
-backend. SearXNG is a backend, not a family-facing UI — it has **no auth**, so it
-never placed behind the public reverse proxy. It publishes no host port: consumers reach it over
-the shared `ai` Docker network at `http://searxng:8080`.
-
-Config is declarative: `services/ai/searxng/settings.yml` is mounted read-only and carries only
-the overrides on top of SearXNG's defaults — chiefly enabling the **JSON API**
-(`search.formats: [html, json]`) so programmatic clients can query it. Its runtime cache
-persists on `${DOCKER_APPDATA_ROOT}/searxng` (ZFS-backed).
-
-- `SEARXNG_SECRET` (a **secret**, never committed) is injected at runtime and overrides
-  SearXNG's `server.secret_key`. Generate one with `openssl rand -hex 32`.
-- Open WebUI's native category is seeded disabled with `ENABLE_WEB_SEARCH=false`. This is an Open
-  WebUI **PersistentConfig** value — read on first launch then managed in the UI/DB, so changing it
-  later requires re-seeding (wiping the Open WebUI data) or updating Admin Settings → Web Search.
-- SearXNG deploys as part of the `ai` service — no separate `HOMELAB_SERVICES` entry is needed.
+SearXNG backs Athena MCP's web search inside `services/ai/`. It has **no
+authentication or public port**; only clients on the `ai` network can reach
+`http://searxng:8080`. Its read-only `settings.yml` enables JSON responses,
+and `SEARXNG_SECRET` stays in the external env file. Open WebUI's native search
+is disabled; on existing installs, also disable it in Admin Settings → Web
+Search because that setting persists in the database.
 
 ### Athena MCP (family tools)
 
-The `services/ai/` stack also runs **Athena MCP**, an [MCP](https://modelcontextprotocol.io) server
-that exposes homelab health, shopping lists, calendars, contacts, media, photos, tasks, weather,
-public-web tools, and curated Home Assistant state/actions over Streamable HTTP, consumed by **Open
-WebUI's native MCP** client. `web_search` returns at most five bounded SearXNG results without
-fetching their pages; `fetch_url` separately retrieves bounded text from one selected public HTTP(S)
-page while blocking private-network destinations, automatic or unvalidated redirects, compressed
-bodies, scripts, and subresources.
+Athena MCP runs in `services/ai/`, exposing household tools to Open WebUI over
+the internal Docker network at `http://athena-mcp:8080`. It has no standalone
+authentication or public port. Its web tools use private SearXNG: `web_search`
+returns at most five results and `fetch_url` fetches bounded public text while
+blocking private-network destinations and unsafe redirects.
 
-Like SearXNG it has **no auth**, so it is never placed behind the public reverse proxy: it
-publishes no host port and is reachable only over the shared `ai` Docker network at
-`http://athena-mcp:8080`. It deploys as part of the `ai` service — no separate `HOMELAB_SERVICES`
-entry is needed.
-
-The image is our own, built + published by the `athena-mcp` repo's Forgejo CI (`dotnet publish
--t:PublishContainer`, no Dockerfile) to the Forgejo OCI registry (the same one Forgejo hosts — see
-[`services/forgejo/README.md`](services/forgejo/README.md)). It is **private and pinned by tag AND
-digest** (`${CONTAINER_REGISTRY}/david/athena-mcp:<tag>@sha256:…`). Renovate can't reach the private
-registry, so the pin is bumped by hand: get the newest tag from the athena-mcp CI publish job summary
-and the digest from that build's registry manifest, then update both in `services/ai/docker-compose.yml`.
-
-Ordinary configuration remains in env vars (see the `ATHENA_MCP_*` keys in `.env.template`). The
-Beszel/Scrutiny/Proxmox and Koffan connection details are reused from those services' own vars
-(Koffan is reached over the host's published port, `${DOCKER_HOST_IP}:${KOFFAN_HTTP_PORT}`, since it
-runs on a separate network). Home Assistant reuses `HOMEASSISTANT_IP` /
-`HOMEASSISTANT_HTTP_PORT`; its proof lifetime and hazard-focused denylist also remain ordinary
-configuration. The internal SearXNG URL and established English search policy are fixed in compose.
-`Homelab__Proxmox__AllowInsecureTls=true` is set in compose (config, not a secret): the Proxmox API
-presents a self-signed cert, trusted for this client only.
+Forgejo CI publishes the private image. Renovate cannot inspect that registry;
+update its tag **and digest** in `services/ai/docker-compose.yml` from the CI
+publish summary and registry manifest. Service endpoints and Home Assistant's
+proof lifetime/denylist use external `ATHENA_MCP_*` env vars; Koffan is reached
+via its published host port because it uses a separate Docker network.
 
 The canonical roster and per-user credentials are the exception. They live in the external
 `${CONFIG_DIR}/athena/users.json`, mounted read-only at `/run/secrets/athena-users.json`. The file is
@@ -669,9 +533,8 @@ case-insensitively. Omit a provider credential for users who do not use that pro
 endpoints, shared identity secrets, list settings, or unrelated application configuration in this
 file: the application ignores those keys here.
 
-Shared curated knowledge is also external NAS-owned configuration. Keep it under
-`${CONFIG_DIR}/athena/knowledge`, mounted read-only into Athena at `/knowledge`, with this fixed
-layout:
+Keep curated knowledge outside this repo under `${CONFIG_DIR}/athena/knowledge`,
+mounted read-only at `/knowledge`, with this fixed layout:
 
 ```text
 knowledge/
@@ -682,28 +545,16 @@ knowledge/
         └── <topic>.md
 ```
 
-Compose sets `Knowledge__CuratedRootPath=/knowledge`. Athena loads only the fixed registry file and
-top-level `*.md` files in `curated/shared`, validates the complete corpus when a knowledge tool is
-called, and keeps unrelated tools available if the corpus is missing or invalid.
-
-The knowledge mount is always read-only. Keep all real family entries outside this repository, and
-do not print corpus content in deployment or validation logs. The source change can be reviewed and
-validated without accessing the live corpus.
+Athena loads only the registry and top-level `curated/shared/*.md`, validating
+the corpus on knowledge-tool calls. Never commit or log its private contents.
 
 **One-time operator setup** (needs admin on Forgejo/Beszel/Proxmox/Home Assistant + write access to
 the NAS config):
 
-1. **Give the Docker host registry credentials** so it can pull the image. This is declarative: set
-   `CONTAINER_REGISTRY`, `CONTAINER_REGISTRY_USER`, and `CONTAINER_REGISTRY_TOKEN` (a `package:read`
-   Forgejo PAT) in the NAS env. The `ai` stack's pre-deploy hook (`services/ai/pre-up.sh`) logs the
-   Docker host into the registry automatically right before it pulls `athena-mcp` — no manual
-   `docker login`, and it re-authenticates after an LXC rebuild.
-
-   > **Single-pass cold re-pave.** The registry is the Forgejo FQDN served through the reverse proxy
-   > (`dns` → `reverse-proxy` → `forgejo`). A setup module runs before any service and would deadlock
-   > a from-scratch re-pave, so the login lives in the `ai` pre-up hook instead. **List `dns`,
-   > `reverse-proxy`, and `forgejo` before `ai` in `HOMELAB_SERVICES`** so that path is up when the
-   > hook runs; a single `setup.sh` then converges with no manual steps.
+1. **Configure registry access:** set `CONTAINER_REGISTRY`, `CONTAINER_REGISTRY_USER`,
+   and `CONTAINER_REGISTRY_TOKEN` (a `package:read` PAT). The `ai` pre-up hook
+   logs in before pulling the image. **List `dns`, `reverse-proxy`, and `forgejo`
+   before `ai` in `HOMELAB_SERVICES`** so cold rebuilds can reach the registry.
 2. **Create a read-only Beszel user** and set `ATHENA_MCP_BESZEL_IDENTITY` / `_PASSWORD`
    (`_AUTH_COLLECTION` defaults to `users`; use `_superusers` only if a superuser is required to read
    every host). **Share each monitored host with this user** in Beszel, or it is silently missing from
@@ -714,24 +565,19 @@ the NAS config):
    `pveum acl modify / --tokens 'athena@pve!mcp' --roles PVEAuditor`. Set `ATHENA_MCP_PROXMOX_TOKEN_ID`
    (`user@realm!tokenid`), `ATHENA_MCP_PROXMOX_TOKEN_SECRET`, and `ATHENA_MCP_PROXMOX_NODE` (the node
    whose storage/guests to report).
-4. **Create the user snapshot.** Build one canonical roster from the existing indexed email values,
-   then map each currently configured provider credential to that user's stable ID. Do this locally
-   on the NAS without printing the source variables or generated JSON. Create a temporary file in
-   `${CONFIG_DIR}/athena/`, set it to mode `0644`, then rename it to `users.json` in the same
-   directory so replacement is atomic. Rename preserves the temporary file's mode; setting it before
-   replacement keeps the file consistent with the config tree's container-readable permission
-   policy. Athena MCP owns file loading, JSON parsing, and full roster and credential validation at
-   startup, before it can become healthy.
+4. **Create the user snapshot** at `${CONFIG_DIR}/athena/users.json` using the
+   schema above. Map each user's provider credentials to their stable ID without
+   printing secrets. Write a temp file in the same directory, set mode `0644`,
+   then rename it atomically; Athena validates the entire file at startup.
 
    Keep HA's conversation-Assist exposure limited to entities Athena may read. Transfer the current
    hazard inventory, without changing membership, to
    `ATHENA_MCP_HOMEASSISTANT_DENIED_ENTITY_IDS` as one JSON array of exact entity IDs. In the NAS env,
    use a shell-safe value such as `'["light.example","switch.example"]'`; use `[]` only when the
    inventory is intentionally empty.
-5. **Create the curated knowledge corpus.** Populate `${CONFIG_DIR}/athena/knowledge` using the fixed
-   layout above. Follow Athena MCP's `docs/knowledge-tools.md` schema and bounds. Keep the files
-   private on the NAS; do not copy them into this repository or deployment logs. Files created
-   locally on the NAS must retain the config tree's container-readable mode across replacement.
+5. **Create the curated knowledge corpus** using the layout above and Athena
+   MCP's `docs/knowledge-tools.md` schema. Keep files on the NAS, readable by
+   the container but never in repo or logs.
 6. **Register the server in Open WebUI** (PersistentConfig/UI state) at
    `http://athena-mcp:8080`, grant it to the intended users/groups, and attach it to the Athena
    model. Keep that model's `builtin_tools` capability disabled. The server spotlights every tool
@@ -740,43 +586,24 @@ the NAS config):
    echoed. Deploying the container only makes new tools reachable through an existing unfiltered
    connection; it does not create the connection, grants, model attachment, or prompt.
 
-**Credential migration and cutover:** keep the old indexed roster, provider credential, and Home
-Assistant denylist values in the external NAS env through acceptance; the new image ignores the
-credential entries because Compose no longer passes them through. Before deploying, back up that
-external env and record the current Homelab revision/image pin without displaying their contents.
-Temporarily prevent new Athena model responses in Open WebUI and let active responses finish before
-running `./scripts/run-service.sh ai` so replacing the Athena MCP container cannot reset the Home
-Assistant per-turn ledger mid-response.
+Before replacing Athena MCP, back up its external configuration, record the
+current image pin, and drain active model responses so the in-memory Home
+Assistant action ledger is not reset mid-turn.
 
 After deployment, confirm `docker ps` shows `athena-mcp` `(healthy)` and
 `docker exec open-webui curl -s http://athena-mcp:8080/health` returns `Healthy`.
 
-Inspect the Athena container's `/knowledge` mount and confirm Docker reports it as read-only. Then,
-as an authenticated non-admin user, run a knowledge search that should match one known entry and
-expand its returned ID. Confirm the calls succeed without recording the returned family content.
+Verify the intended image, read-only knowledge mount, and a non-admin user's
+knowledge, search/fetch, and provider read-only tools without logging family
+data. Keep Open WebUI's native search disabled under Admin Settings → Web Search
+on an existing installation (PersistentConfig).
 
-Sign in as a non-admin user through the Athena model and confirm `web_search` returns no more than
-five relevant result records and `fetch_url` retrieves a selected public result. Open WebUI v0.10.2
-does not guarantee native source cards for these MCP tools, so treat the returned/final URLs as
-authoritative. Native search is PersistentConfig: keep it disabled under Admin Settings -> Web
-Search on an existing instance.
+For credential-file updates, drain responses, atomically replace `users.json`
+with mode `0644`, and run `./scripts/recreate-service.sh ai`. A restart can
+retain the old bind-mounted inode; Compose may not recreate an unchanged service.
 
-Verify the intended image identity, then exercise at least one affected read-only tool for each
-configured user/provider without recording returned family data. For later credential-file-only
-updates, drain responses, set the replacement file to mode `0644`, replace `users.json` atomically,
-and run
-`./scripts/recreate-service.sh ai`; a plain container restart can retain the old bind-mounted inode,
-and a normal Compose up need not recreate an otherwise unchanged service.
-
-> **Health check:** the ASP.NET runtime image has no `curl`/`wget`/`bash`, so the container can't
-> probe its `/health` endpoint with a shell command. Instead the app probes itself — the `healthcheck`
-> re-invokes the binary as `dotnet /app/AthenaMcp.Server.dll --health-check`, which issues an
-> in-process GET to `/health` and exits `0` (healthy) / non-zero (unhealthy).
-
-If identity resolution, credential selection, startup validation, provider access, or Home
-Assistant safety fails, restore the prior Homelab revision/image and redeploy while the old external
-values are still present. Remove those legacy values only after the mounted-file deployment has
-been accepted.
+If identity, provider access, or Home Assistant safety fails, restore the
+previous image and external configuration before redeploying.
 
 ### Home Assistant tools (curated Athena MCP wrapper)
 
@@ -845,17 +672,9 @@ First-run setup notes:
 
 ### Koffan (shared shopping list)
 
-`services/koffan/` runs [Koffan](https://github.com/PanSalut/Koffan), a featherweight local-first
-shopping-list PWA (Go + Fiber + SQLite, ~2.5 MB RAM). It is a **dedicated** app for the household
-shopping list — task management stays in Vikunja. It supports multiple named lists (e.g. Grocery,
-Costco), works fully offline and auto-syncs on reconnect, and updates in real time over WebSocket
-while the app is open on multiple devices.
-
-A single container persists its SQLite database at `${DOCKER_APPDATA_ROOT}/koffan/shopping.db`
-(ZFS-backed). It is exposed via Caddy at `KOFFAN_FQDN` (also on the LAN at
-`http://<docker-host-ip>:${KOFFAN_HTTP_PORT}`); Caddy upgrades the WebSocket automatically.
-Setting `KOFFAN_API_TOKEN` (a secret) enables a token-gated REST API
-([wiki](https://github.com/PanSalut/Koffan/wiki/REST-API)).
+`services/koffan/` runs a local-first shopping-list PWA. Its SQLite state
+persists under `${DOCKER_APPDATA_ROOT}/koffan`; Caddy exposes it at
+`KOFFAN_FQDN`. Set `KOFFAN_API_TOKEN` to enable the token-gated REST API.
 
 **Auth.** Koffan has a simple single-password login (`KOFFAN_APP_PASSWORD`, a secret; a blank value
 falls back to Koffan's public default, so set a strong one). Since it is publicly exposed, once
@@ -866,95 +685,35 @@ REST API uses its own `API_TOKEN` bearer and can't do interactive SSO).
 
 ### Radicale (CalDAV/CardDAV)
 
-`services/radicale/` runs [Radicale](https://radicale.org), a self-hosted CalDAV/CardDAV
-server — the homelab's **calendar** (`VEVENT`) and **contacts** (`VCARD`) store. Family
-devices sync to it with standard clients (Apple Calendar/Contacts, DAVx⁵ on Android,
-Thunderbird). It uses the hardened [`tomsquest/docker-radicale`](https://github.com/tomsquest/docker-radicale)
-image (read-only root filesystem, all capabilities dropped except the few its entrypoint
-needs, no-new-privileges; runs as a non-root user).
+`services/radicale/` stores calendars and contacts on ZFS-backed appdata.
+It uses its own bcrypt htpasswd authentication because CalDAV/CardDAV clients
+cannot use Authelia forward-auth. Strong per-user credentials are required:
+Caddy exposes `RADICALE_FQDN` publicly.
 
-Radicale keeps its **own htpasswd auth** (bcrypt) and is deliberately **not** placed behind
-Authelia/forward-auth: native CalDAV/CardDAV clients authenticate with HTTP Basic auth, which
-a forward-auth layer would break. It **is** exposed publicly via Caddy at `RADICALE_FQDN`
-(site block in `services/reverse-proxy/Caddyfile`), so per-user credentials must be strong. It
-is also reachable on the LAN at `http://<docker-host-ip>:${RADICALE_HTTP_PORT}`.
+Users own personal collections under `/<user>/`; adults can read all personal
+calendars. The shared `/family/` calendar is adult-write/kid-read by default.
+Radicale does not auto-create `/family/`: issue `MKCOL` for `/family/`, then
+`MKCALENDAR` for `/family/<name>/`; add that URL to each device manually
+(auto-discovery finds only personal collections). Radicale stores events, not
+scheduling invitations.
 
-Config is declarative: `services/radicale/config` is mounted read-only (filesystem storage,
-htpasswd+bcrypt auth, `from_file` rights). Collections persist on
-`${DOCKER_APPDATA_ROOT}/radicale` (ZFS-backed).
-
-**Access model (personal calendars + one shared family calendar).** Radicale has no
-scheduling/attendee delivery (it is a store, not groupware), so sharing is by *shared
-collection*, not by inviting attendees — though `ATTENDEE` properties are still stored on
-events, so a tool like Athena can read who's involved. The rights are:
-
-- Each user owns their personal calendars/address books under `/<user>/`.
-- A **shared family calendar** lives at `/family/` — adults read+write, kids read-only by
-  default. The vast majority of household events go here; an adult creates it once. Because
-  `/family/` is not a user principal, Radicale does not auto-create it, so make the parent
-  collection first and then the calendar (a one-step `MKCALENDAR` on the nested path returns
-  409): `MKCOL https://<RADICALE_FQDN>/family/` then
-  `MKCALENDAR https://<RADICALE_FQDN>/family/<name>/`. Every device then subscribes to that
-  calendar URL (CalDAV auto-discovery only surfaces a user's *own* collections, so the shared
-  one is added by URL once per device).
-- Adults can read every member's personal calendars; kids cannot see others' personal
-  calendars by default.
-
-These rules map usernames to collections, so — like the htpasswd file — they live in a rights
-file kept **off the repo** on the NAS. The repo ships a name-free template:
-
-- The **htpasswd file is a secret** and is **not** committed. Create it on the NAS at
-  `<config_dir>/radicale/users` (mounted read-only at `/config/users`), one `user:bcrypt-hash`
-  per line. Generate entries with `htpasswd -B` (bcrypt) — `htpasswd -B -c .../users alice` for
-  the first user, then `htpasswd -B .../users bob` to append.
-- The **rights file** also contains usernames, so it is **not** committed either. Copy
-  `services/radicale/rights.example` to `<config_dir>/radicale/rights` (mounted read-only at
-  `/config/rights`), replacing the placeholder adult usernames. The example documents the
-  Radicale permission letters and the one-line tweaks for "kids can edit the family calendar"
-  or "hide personal calendars from everyone."
-- Both files **must exist before the first deploy** — Docker would otherwise create the missing
-  bind-mount source as a directory and break Radicale.
-- Radicale runs as a non-root user inside the container, so both files must be readable by
-  "other". `services/radicale/pre-up.sh` (run automatically on each deploy) enforces this
-  (`chmod o+r`) and aborts the deploy if either file is missing, so no manual `chmod` is needed.
-- The Caddy block adds the **CalDAV/CardDAV `.well-known` redirects** (`/.well-known/caldav`
-  and `/.well-known/carddav` → `/`) so clients can auto-discover the DAV root from the bare
-  domain (e.g. adding a CalDAV account on iOS with just the server hostname).
+Create `<config_dir>/radicale/users` using `htpasswd -B` (`-c` only for the
+first user). Copy `services/radicale/rights.example` to
+`<config_dir>/radicale/rights` and replace placeholder names. Both files
+contain private data, must stay off repo, and **must exist before deployment**
+or Docker creates missing bind sources as directories. `pre-up.sh` checks
+their existence and grants read access to the non-root container.
 
 ### Forgejo (git hosting + Actions runner)
 
-`services/forgejo/` runs the Forgejo git host and a co-located **Actions CI runner** (the
-`forgejo-runner` container) in one compose project, so Forgejo repos can run Actions workflows and
-publish container images to Forgejo's built-in OCI registry. The runner has no purpose without the
-git host, so the two ship and deploy together (like SearXNG within the `ai` stack). Being in the
-same project, the runner reaches Forgejo over the internal network at `http://forgejo:3000` (no
-public-FQDN NAT hairpin, no TLS); it uses the host Docker socket to spawn each job's container (the
-same socket precedent as `services/webhook`).
-
-Both the git host and the runner use the **genuine official** Forgejo images, pulled from our own
-ghcr mirror (`ghcr.io/dfederm/homelab/forgejo` and `…/forgejo-runner`). The upstream Forgejo
-registries (`codeberg.org`, `code.forgejo.org`) are unreachable from this network — the
-Comcast/Hetzner routing issue — and the runner has no third-party mirror anywhere, so rather than
-trust a third-party Docker Hub mirror we mirror the official images to ghcr ourselves via
-[`.github/workflows/mirror-images.yml`](.github/workflows/mirror-images.yml) (GitHub-hosted runners
-reach the upstreams; the homelab reaches ghcr). The official runner image is a bare binary with no
-auto-registration wrapper, so the compose `command` registers once on first start and then runs the
-daemon.
-
-Runner labels (which `runs-on:` values it serves) are defined in the committed, read-only
-`services/forgejo/runner-config.yaml` rather than via an env var, so they are authoritative on
-every restart. The default label is `docker`, backed by the Docker backend. The registration
-state persists at `${DOCKER_APPDATA_ROOT}/forgejo-runner/.runner`, so the runner survives
-container recreation without re-registering.
-
-**Operator setup (one-time) is documented in
-[`services/forgejo/README.md`](services/forgejo/README.md)** — generating the registration token,
-creating the package access tokens, the secrets to add, and enabling Actions on a repo. After
-editing `runner-config.yaml`, restart just the runner so it is re-read (this avoids bouncing the
-git host):
-```bash
-docker restart forgejo-runner
-```
+`services/forgejo/` runs Forgejo and its Actions runner together. Both pull
+official images from the [self-hosted ghcr mirror](#self-mirrored-images-ghcr)
+because the upstream registry is unreachable from the homelab. The runner
+uses the host Docker socket to start jobs; registration state persists under
+`${DOCKER_APPDATA_ROOT}/forgejo-runner/`. Labels live in
+`services/forgejo/runner-config.yaml`; restart **only the runner** after editing
+that file. See [`services/forgejo/README.md`](services/forgejo/README.md) for
+one-time registration, credentials, and CI setup.
 
 ### Multi-instance services
 
@@ -1001,48 +760,30 @@ and add an entry to the BedrockConnect menu file.
 
 ### Backup (cloud sync)
 
-`services/backup/` is a multi-instance service: each target in `BACKUP_INSTANCES` runs as its
-own `rclone` container (`backup-<target>`) that syncs its read-only source directory
-to a cloud destination. Per-target settings — the absolute source directory on the Docker
-host (`BACKUP_SOURCE_PATH`), the rclone destination (`BACKUP_DEST`), and an optional cron schedule
-(`BACKUP_CRON`) — live in `<config_dir>/backup/<target>.env` (copy
-`services/backup/backup.env.example`). Each container runs the sync once on start and then on
-its cron schedule (default 03:00 daily; stagger `BACKUP_CRON` per target to avoid contention);
-a failed sync exits non-zero and is visible in the container logs.
+Each `BACKUP_INSTANCES` target runs a separate rclone sync container with
+read-only source and per-target `<config_dir>/backup/<target>.env` (see
+`services/backup/backup.env.example`). Sync runs on start and on `BACKUP_CRON`
+(default 03:00 daily); stagger targets sharing rclone config.
 
-Every target must set `BACKUP_SOURCE_PATH` to an existing absolute directory. The
-pre-deploy check rejects missing, relative, or nonexistent sources before Compose runs.
-Deploy through `run-service.sh`: running Compose directly bypasses that check and can
-create a missing source directory. Update existing target env files before deploying
-this configuration.
+Set `BACKUP_SOURCE_PATH` to an existing absolute Docker-host directory. Deploy
+through `run-service.sh`: its pre-up check rejects missing/relative sources;
+calling Compose directly can create a missing source directory.
 
-The rclone remotes are defined once in the shared config at `${DOCKER_APPDATA_ROOT}/backup/rclone`,
-mounted read-write so OAuth token refreshes (e.g. OneDrive) persist. Each target reads only its
-own remote. Because the config is shared and rclone rewrites it on a token refresh, stagger
-`BACKUP_CRON` so targets don't refresh at the same instant; the on-start syncs aren't staggered,
-but at deploy time tokens are normally still valid, so a refresh race there is unlikely.
+Remotes live in writable `${DOCKER_APPDATA_ROOT}/backup/rclone/rclone.conf`;
+rclone refreshes OAuth tokens there. To edit it over SMB while preserving
+service write access and private file modes, include its directory in
+`SMB_ADMIN_CONFIG_DIRS` in the NAS env file.
 
-`rclone.conf` is both service-written (rclone rotates OAuth tokens back into it) and admin-edited
-(to add a remote / family member), so neither "owned by the service" nor "read-only admin config"
-fits. Listing the rclone config dir in `SMB_ADMIN_CONFIG_DIRS` (on the NAS) reconciles this:
-`install-samba` keeps it owned `root:admin` with a default ACL granting the `admin` group write and
-its files group-writable but not world-readable (so the tokens stay private). rclone preserves an
-existing config file's owner+mode when it rewrites it, so that admin grant survives token
-rotations — admins can edit `rclone.conf` over SMB without getting locked out.
-
-Adding a target requires its `<target>.env`, an existing source directory on the Docker host,
-and its name in `BACKUP_INSTANCES` — no repo change. Its remote must exist in the shared
-`rclone.conf`; minting a OneDrive remote's token is a one-time interactive step (`rclone config`
-/ `rclone config reconnect <remote>:` inside the container). On a brand-new config the container
-first creates `rclone.conf` as `root:root`; the next `setup.sh` (i.e. `install-samba`) run
-normalizes it to admin-editable.
-Shared folders with no single owner (e.g. `family`, `adults`)
-back up into an existing personal remote under a **separate** top-level path so they don't collide
-with that person's own backup — e.g. a `family` target → `onedrivedavid:/nas-backup-shared/family`
-while david's own backup stays at `onedrivedavid:/nas-backup`. This is enforced, not just advisory:
-`run-service.sh` runs `services/backup/pre-up.sh` before deploying and **aborts** if any two
-targets' destinations overlap on the same remote (an equal or ancestor path would let one target's
-pruning sync delete another's backup).
+**Before first deployment**, create the remote with `rclone config` inside a
+one-off rclone container that mounts `${DOCKER_APPDATA_ROOT}/backup/rclone`
+at `/config/rclone` (as in `services/backup/docker-compose.yml`). The startup
+sync cannot succeed without the remote. For later token refreshes, run
+`docker exec -it backup-<target> rclone config reconnect <remote>:` inside a
+running target container. Running plain `rclone config` on the Docker host
+would write a different config file. On a new config, a subsequent NAS
+`setup.sh` run makes `rclone.conf` admin-editable. **Destinations on the same remote must be
+disjoint:** sync prunes the destination, so an equal or ancestor path can
+delete another target's data. `pre-up.sh` rejects overlaps before deployment.
 
 ## Env Files
 
@@ -1102,29 +843,27 @@ Docker images are pinned to specific versions with SHA256 digests for reproducib
 
 ### Reclaiming superseded images
 
-Each digest bump pulls a new image and leaves the old one on disk, so without a sweep the Docker host's rootfs only ever grows. The **`configure-docker-image-prune`** module (Docker LXC) schedules `scripts/docker-image-prune.sh` on `DOCKER_IMAGE_PRUNE_SCHEDULE`; it logs the unreferenced images by name, then removes them with `docker image prune -a`. A container protects its image whether it is running or stopped, so one-shot containers that exit after a deploy keep theirs, and anything removed is re-pullable from the digest pinned in git.
+`configure-docker-image-prune` schedules `scripts/docker-image-prune.sh` on
+`DOCKER_IMAGE_PRUNE_SCHEDULE`. It removes images unused by any container (even
+stopped ones), **never volumes, containers, or build cache**. `-a` is needed
+because digest-pinned images show as `<none>` but are not dangling. Schedule the
+prune before `LXC_FSTRIM_SCHEDULE` so the host returns freed LXC blocks to the
+thin pool. Preview with `bash scripts/docker-image-prune.sh --dry-run`.
 
-`-a` is required, not a precaution: because images are pinned by digest, Docker holds them by repo digest rather than by tag, so `docker images` shows their tag as `<none>` without them being dangling. A plain `docker image prune` skips every one of them and can report gigabytes reclaimable while freeing nothing. (The per-deploy `docker image prune -f` in `run-service.sh` is a narrower job — it clears the dangling leftovers of the locally-built `webhook` image.)
-
-**Schedule it earlier in the week than `LXC_FSTRIM_SCHEDULE`.** The prune frees files inside the LXC; only the host's `pct fstrim` returns those blocks to the LVM thin pool. The two timers run on different machines, so nothing enforces the order but the calendar — the defaults in `.env.template` prune on Sunday and trim on Monday.
-
-Volumes are never pruned and stopped containers are never reaped. Removing an image is reversible; removing a volume holding service state is not. Review leftover containers by hand with `docker ps -a --filter status=exited`.
-
-Build cache is not pruned either. It is a few dozen megabytes — noise next to the images this reclaims — and clearing it would make the locally-built `webhook` service rebuild from scratch on its next deploy, producing new layer digests that Compose treats as a changed image and recreates the container for.
-
-A deploy landing in the same moment is an accepted race: between `docker compose pull` and `docker compose up` a freshly pulled image is referenced by no container yet, so a sweep in that window can remove it. Compose pulls a missing image again, so that gap heals itself; the narrower window *inside* a single `up` does not — images are resolved up front, so a service still waiting on a `depends_on` health gate fails to create rather than re-pulling. The next deploy puts it right, since the digest is pinned in git.
-
-To see what a run would remove without removing anything: `bash scripts/docker-image-prune.sh --dry-run`.
+A prune racing a deploy may remove a newly pulled image before it is used. A
+subsequent deploy re-pulls it; a service waiting inside `compose up` on a
+health gate may instead fail until the next deploy.
 
 ### Self-mirrored images (ghcr)
 
-A few upstream registries are unreachable from this network due to upstream routing problems (notably Forgejo's `codeberg.org` and `code.forgejo.org`, which time out from this ISP). Rather than depend on an unverified third-party Docker Hub mirror, the [`mirror-images`](.github/workflows/mirror-images.yml) GitHub Actions workflow copies the genuinely-official images to `ghcr.io/dfederm/homelab/*` (GitHub-hosted runners can reach the upstream registries; the homelab can reach ghcr). The compose files then pull from ghcr.
+The [`mirror-images`](.github/workflows/mirror-images.yml) workflow copies
+official images from registries this network cannot reach to public
+`ghcr.io/dfederm/homelab/*`. It runs weekly or on demand; add images to its
+matrix and use the published tag and digest from the run summary. Renovate
+updates Compose pins after mirroring.
 
-The workflow runs weekly and on demand (`workflow_dispatch`). For each image in its matrix it picks the newest stable upstream release, copies the full multi-arch manifest with `skopeo copy --all` (preserving the official digest), and prints the pinnable `@sha256` ref in its run summary. Versions are not pinned in the workflow — it always mirrors the newest stable release, and Renovate pins the exact version+digest in the compose files (so a version bump never needs a workflow edit first). To mirror another image, add a row to the workflow's matrix.
-
-One-time admin per mirrored package: none — packages pushed from this public repo inherit its visibility, so they are public and the homelab pulls them without authentication. Renovate tracks the ghcr ref like any other image and opens version/digest bump PRs.
-
-> **Merge ordering matters.** When first repointing a compose image at a self-mirrored ghcr ref, run the workflow *before* merging the compose change, and pin a tag the run actually published (shown in its summary; the workflow mirrors the newest stable upstream release, which may differ from the tag currently in compose). Deploys pull the image (`docker compose pull`) — merging a tag that was never mirrored would point a live service at an image that does not exist yet and fail its next deploy. After bootstrap, Renovate keeps the compose tag and the published ghcr tags in sync.
+**Run the mirror workflow before first repointing a Compose image** and pin a
+tag it actually published; otherwise the next deployment cannot pull it.
 
 ## CI/CD
 

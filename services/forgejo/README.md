@@ -1,32 +1,15 @@
 # Forgejo
 
-Git hosting (the `forgejo` container) plus a co-located **Actions CI runner** (the
-`forgejo-runner` container). Both ship in this one compose project: the runner has no purpose
-without the git host, and being in the same project lets it reach Forgejo over the internal
-network at `http://forgejo:3000` (no public-FQDN NAT hairpin, no TLS) and start/stop alongside it.
-
-Both images are the **genuine official** Forgejo images, pulled from our own ghcr mirror
-(`ghcr.io/dfederm/homelab/*`) because the upstream Forgejo registries are unreachable from this
-network — the mirror is synced by [`.github/workflows/mirror-images.yml`](../../.github/workflows/mirror-images.yml).
-
-Forgejo itself is configured entirely through `FORGEJO__*` env vars (see `docker-compose.yml`) and
-needs no manual setup beyond claiming the admin account on first launch. The runner, however, needs
-a few one-time admin actions, documented below.
+Forgejo and its Actions runner deploy together. Their official images come
+from the [ghcr mirror](../../.github/workflows/mirror-images.yml) because the
+upstream registries are unreachable. Claim the admin account on first launch;
+the runner needs the one-time setup below.
 
 ## Actions runner
 
-The runner lets Forgejo repos run Actions workflows and publish container images to Forgejo's
-built-in OCI registry.
-
-- **Image:** the official `forgejo-runner`, via our ghcr mirror
-  (`ghcr.io/dfederm/homelab/forgejo-runner`). The upstream `code.forgejo.org` registry is
-  unreachable from this network and has no third-party mirror, so we mirror the genuine image to
-  ghcr ourselves. The official image is a bare binary, so the compose `command` builds a connection
-  config from the shared secret and runs the daemon. See the comment block in `docker-compose.yml`.
-- **State:** the generated connection config persists at
-  `${DOCKER_APPDATA_ROOT}/forgejo-runner/config.yml` and survives container recreation.
-- **Labels:** defined in the read-only `runner-config.yaml` (authoritative on every restart). The
-  default label is `docker`; a workflow opts in with `runs-on: docker`.
+The runner's connection state persists under `${DOCKER_APPDATA_ROOT}/forgejo-runner/`.
+Labels live in the read-only `runner-config.yaml`; jobs use `runs-on: docker`
+by default.
 
 ### One-time operator setup
 
@@ -43,42 +26,20 @@ Sign in as admin and open `https://<FORGEJO_FQDN>/-/admin`:
 
 #### 2. Add the runner's shared secret to the env file
 
-The runner uses the shared-secret model — a token from the web UI's "Create new Runner" does
-**not** work. Generate a 40-char hex secret and store it; registering it with Forgejo is automated
-(see below), so this is the only manual part:
+The runner uses a shared secret, **not** a token from the UI's "Create new
+Runner". Generate 40 hex characters with `openssl rand -hex 20` and set
+`FORGEJO_RUNNER_TOKEN` in the Docker host's external env file.
 
-- Generate: `openssl rand -hex 20`.
-- On the NAS, add it to the Docker host's env file (e.g. `<hostname>.env`):
-  ```
-  FORGEJO_RUNNER_TOKEN=<secret>
-  ```
-  The runner derives the matching connection uuid from the secret and connects on start; nothing
-  is consumed, so re-deploys keep working.
+`post-up.sh` registers it idempotently after Compose starts. On a brand-new
+Forgejo with no persisted `/data`, first complete the setup wizard and claim
+admin; the hook skips registration until the next deploy.
 
-**Registration is handled by `post-up.sh`.** On each `run-service.sh forgejo`, the hook runs the
-idempotent `forgejo-cli actions register` against the `forgejo` container, so you no longer run it by
-hand. It's a **post**-up hook (runs *after* `docker compose up`) so it converges in a single deploy
-for the normal cases: forgejo's `/data` lives on ZFS and persists across container/LXC repaves, so a
-repaved host boots an already-installed forgejo and the hook registers in that same deploy (the
-runner starts alongside, retries its connection, and attaches as soon as it lands). Every steady-state
-deploy re-registers idempotently.
-
-The one exception is a **brand-new forgejo with no persisted `/data`**: it boots *uninstalled* and
-serves the first-run wizard, and `forgejo-cli` refuses to register a runner until first-run setup is
-complete. That's forgejo's own bootstrap requirement (see step 1 — claim the admin account), not
-something a hook can skip. On that first install the hook detects the uninstalled state and skips with
-guidance; once you've claimed admin, the next deploy registers the runner. To register by hand (e.g.
-debugging), the underlying command is:
+To register manually when debugging:
 ```bash
 printf '%s' "$FORGEJO_RUNNER_TOKEN" | docker exec -i --user git forgejo \
   forgejo forgejo-cli actions register --keep-labels --name <host> --secret-stdin=stdin
 ```
-(The `--secret-stdin=stdin` value is a required placeholder — forgejo-cli treats the flag as
-value-expecting, so a bare `--secret-stdin` at the end of the line fails to parse; the value itself
-is ignored and the secret is read from stdin.)
-
-> No `HOMELAB_SERVICES` change is needed — the runner is part of the `forgejo` service, so it
-> deploys whenever `forgejo` does.
+`--secret-stdin=stdin` requires a value even though the value is ignored.
 
 #### 3. Create two package access tokens (Forgejo PATs)
 
@@ -89,9 +50,6 @@ is ignored and the secret is read from stdin.)
 |---|---|---|
 | **CI push** | `package` → **write** | The CI workflow, to push the image. |
 | **Host pull** | `package` → **read** | The Docker host, to pull the private image at deploy time (via the `ai` stack's `pre-up.sh` hook). |
-
-> Tip: in Forgejo the `package` scope offers read/write granularity. Use write for CI, read for the
-> pull-only host token, so the long-lived host credential cannot push.
 
 #### 4. Add the CI secrets to each repo that will use the registry
 

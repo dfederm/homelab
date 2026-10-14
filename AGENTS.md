@@ -52,9 +52,9 @@ When writing or modifying setup modules, use these established patterns:
 ### Env Files
 
 - Env files live **outside the repo** at `<zfs_mount>/homelab/config/`. They contain secrets and machine-specific values.
-- `.env.template` in the repo documents ALL available variables. Keep it updated when adding new vars.
+- `.env.template` inventories available variables. Keep it updated when adding new vars.
 - `common.env` is sourced before machine-specific env files. Machine values override common ones.
-- When adding a new env var, add it to `.env.template` with a comment explaining its purpose.
+- Explain non-obvious formats, dependencies, defaults, and hazards in `.env.template`; self-describing names need no comment.
 
 ### Proxmox / LXC / VM specifics
 
@@ -65,27 +65,13 @@ When writing or modifying setup modules, use these established patterns:
 
 ## When Creating New Setup Modules
 
-1. **Study an existing module first** — Look at 2-3 existing modules in `scripts/setup/modules/` to understand the conventions, patterns, and logging style before writing a new one
-2. Place in `scripts/setup/modules/<name>.sh`
-3. Start with `set -euo pipefail` and `source "$REPO_DIR/scripts/lib.sh"`
-4. Document required env vars in the file header comment
-5. Use `validate_env` for required vars
-6. Install packages with `apt_get`, not bare `apt-get`
-7. Make it idempotent — check before modifying, log what changed vs what was already correct
-8. Add to the module table and cascade diagram in `README.md`
-9. Add to `.env.template` if new env vars are needed
-10. The module is activated by adding its name to `HOMELAB_SETUP_MODULES` in a machine's env file
+1. Follow nearby modules in `scripts/setup/modules/<name>.sh`: `set -euo pipefail`, source `lib.sh`, validate required vars, use `apt_get`, and reconcile changes idempotently. List required env vars in the header.
+2. List the module in the README and any new vars in `.env.template`. Activate it through the machine's `HOMELAB_SETUP_MODULES`.
 
 ## When Creating New Docker Services
 
-1. **Study an existing service first** — Look at 2-3 existing services in `services/` to match the compose style, env var naming, and volume mount patterns
-2. Create `services/<name>/docker-compose.yml`
-3. Parameterize everything — use env vars for ports, paths, domains, credentials
-4. Pin the image version with a sha256 digest
-5. Use bind mounts to `${DOCKER_APPDATA_ROOT}/<name>/` for persistent data
-6. Add the service to the directory listing and services section in `README.md`
-7. Add all new env vars to `.env.template` with comments
-8. The service is activated by adding its name to `HOMELAB_SERVICES` in a machine's env file
+1. Follow nearby Compose definitions in `services/<name>/docker-compose.yml`: parameterize site-specific values, pin image version and digest, and bind-mount persistent state under `${DOCKER_APPDATA_ROOT}/<name>/`.
+2. Document the service in the README and new vars in `.env.template`. Activate it through the machine's `HOMELAB_SERVICES`.
 
 ## Style and Preferences
 
@@ -94,7 +80,7 @@ When writing or modifying setup modules, use these established patterns:
 - **Config-driven** — Behavior should be controlled by env vars, not by editing scripts.
 - **Simple and readable** — Prefer clear bash over clever one-liners. Comment only when the "why" isn't obvious.
 - **No secrets in the repo** — This repo is public. All sensitive values go in env files.
-- **No personal information in the repo** — This repo is designed to be generic and reusable by anyone. Never hardcode IPs, hostnames, usernames, domains, paths, or any setup-specific values into scripts, compose files, or documentation. All such values must be parameterized via env vars. You may prompt the user for personal/setup-specific information to investigate issues, validate configurations, or provide guidance. You may also store such information in memory (via `store_memory`) for future interactions with the same user. But that information must never be committed to the repo.
+- **No personal information in the repo** — Never hardcode setup-specific IPs, hostnames, usernames, domains, or paths; use env vars. Keep any details shared for troubleshooting out of committed files.
 - **Don't commit without review, don't push without explicit approval** — Leave changes unstaged for the user to review. Never auto-commit. **Push may trigger immediate deployment** if the user has configured a deploy webhook (push → webhook signals each top-level target → each worker serializes and coalesces `setup.sh`). The user may want to stack multiple commits and push as a batch to avoid deploy churn. Always wait for explicit "push" / "deploy" / "go ahead" from the user before `git push`.
 - **Surgical changes** — When modifying existing files, change only what's needed. Don't reformat or restructure unrelated code.
 
@@ -113,17 +99,6 @@ When writing or modifying setup modules, use these established patterns:
 - **The env file discovery chain** — `setup.sh` finds its env file via: (1) explicit CLI argument, (2) `/etc/homelab.env` symlink (created on first run), (3) `<config_dir>/<hostname>.env`. Once resolved, it symlinks to `/etc/homelab.env` for future runs.
 - **ZFS datasets need POSIX ACL support** — If the user reports permission issues, check that `acltype=posixacl` and `xattr=sa` are set on the relevant datasets.
 
-## Key File Locations (on the server)
-
-If you need to reference paths in scripts or compose files, ask the user for their specific values. These are the env vars that control paths:
-
-- `ZFS_POOL` — ZFS pool name (root dataset)
-- `DOCKER_APPDATA_ROOT` — Where Docker service data lives (bind-mounted from ZFS)
-- `SHARE_ROOT` — Root of the Samba file share
-- `REPO_DIR` — Set automatically by setup.sh; the absolute path to this repo on the server
-
-Do not hardcode any paths. Always use the env vars.
-
 ## Common Tasks Reference
 
 | Task | Command (on Proxmox host) |
@@ -135,13 +110,3 @@ Do not hardcode any paths. Always use the env vars.
 | Check LXC status | `pct list` |
 | Check VM status | `qm list` |
 | Enter LXC shell | `pct exec <vmid> -- bash` |
-
-## Getting Oriented in a New Session
-
-When starting a new session or task, quickly orient yourself:
-
-1. Read `README.md` for the current architecture, module list, and cascade diagram
-2. Check `.env.template` for all available configuration variables
-3. List `services/` to see what Docker services exist
-4. List `scripts/setup/modules/` to see what setup modules exist
-5. If the user mentions a specific service, machine, or module — read its files before making changes

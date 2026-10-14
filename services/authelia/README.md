@@ -1,23 +1,11 @@
 # Authelia (SSO)
 
-The homelab's **single sign-on / identity provider**. It gives the family one login for the
-services that support it and lets admin surfaces sit behind 2FA. Authelia offers two integration
-methods:
-
-- **OpenID Connect 1.0 (OIDC)** — Authelia acts as an OIDC provider (IdP). Apps that speak OIDC
-  (Open WebUI, Forgejo, Immich, Vikunja, Miniflux, …) redirect their login to Authelia. This works
-  for those apps' **native/mobile clients** too, so it's the preferred method wherever an app
-  supports it.
-- **forward-auth** — for browser-only web UIs with no auth of their own (e.g. an admin dashboard),
-  Caddy delegates the auth decision to Authelia with a `forward_auth` directive.
-
-Open WebUI is wired via **OIDC** as the reference example (see the recipe below); browser-only UIs
-can be added with **forward-auth** using the recipe further down.
+Use OIDC for apps with native clients and Caddy forward-auth for browser-only
+UIs. Open WebUI is the OIDC reference configuration below.
 
 ### Holdouts (deliberately NOT behind Authelia)
 
-Some services keep their **own** auth because putting them behind SSO would break their native
-clients — and, as a bonus, they double as break-glass access if Authelia is ever down:
+These services keep their own authentication to preserve native clients:
 
 - **Jellyfin** — TV / tablet / mobile apps expect Jellyfin's own accounts.
 - **Home Assistant** — the companion app authenticates against HA directly.
@@ -26,16 +14,11 @@ clients — and, as a bonus, they double as break-glass access if Authelia is ev
 Open WebUI itself is enforced **SSO-only** — its local login form is disabled
 (`ENABLE_LOGIN_FORM=false`) and the login page redirects straight to Authelia (`OAUTH_AUTO_REDIRECT=true`).
 
-## How the config is structured
+## Configuration
 
-- `docker-compose.yml` — the container. Enables the `template` config filter and passes the scalar
-  secrets from the environment.
-- `configuration.yml` — **committed, declarative, no secrets, no personal domains.** Personal values
-  (domains, the OIDC issuer key) are injected at load time by the `template` filter from the
-  non-secret env vars and the mounted key file. Scalar secrets are loaded by Authelia directly from
-  `AUTHELIA_*` env vars and are intentionally absent from this file.
-- `users.example.yml` — a template for the **file user backend**. The real `users.yml` is a secret
-  (password hashes + emails) kept on the NAS, never in this repo.
+The committed `configuration.yml` contains no secrets or personal domains.
+Compose injects values from external env vars and read-only secret files.
+Copy `users.example.yml` to the NAS for the real user backend.
 
 ### Secrets and state live off the repo
 

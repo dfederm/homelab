@@ -1,7 +1,5 @@
-# The family AI stack, sharing the internal `ai` network: llama-swap (the lifecycle owner for
-# model-specific llama-server processes), LiteLLM (the authenticated routing boundary), Open
-# WebUI, SearXNG, and Athena MCP. The unauthenticated backends stay internal; only LiteLLM's
-# authenticated port is published to the LAN, and only Open WebUI is exposed through Caddy.
+# Unauthenticated backends stay on the internal ai network; only LiteLLM
+# publishes an authenticated LAN port and Open WebUI has a public Caddy route.
 services:
   llama-swap:
     container_name: llama-swap
@@ -24,10 +22,7 @@ services:
       retries: 5
       start_period: 10s
 
-  # Internal OpenAI-compatible routing seam. Stable workload names keep callers independent of
-  # llama-server model IDs while dedicated virtual keys provide durable per-client usage attribution.
-  # The API and Admin UI share one authenticated port, published only to the LAN; there is no Caddy
-  # route. Configuration stays authoritative in ZFS-backed external YAML rather than the database.
+  # Workload aliases and per-client keys live in external ZFS-backed config.
   litellm:
     container_name: litellm
     image: ghcr.io/berriai/litellm-database:v1.105.1@sha256:2bcadb9905b692a5ca4dadd51bccaaa23a95dc8a0f9322d9c9787f0ac2aeb50e
@@ -84,19 +79,8 @@ services:
       retries: 5
       start_period: 30s
 
-  # Multi-user chat / agent frontend in front of LiteLLM. LiteLLM then reaches llama-swap over the
-  # internal `ai` network. Open WebUI has its own auth (first account
-  # created becomes the admin); it is reachable on the LAN via the published port and exposed
-  # publicly via Caddy (site block in services/reverse-proxy/Caddyfile).
-  # Its SQLite DB + ChromaDB (per-user chats, settings, RAG vectors) persist on ZFS-backed
-  # appdata so they survive container recreation.
-  # NOTE: many of these env vars (ENABLE_OLLAMA_API, WEBUI_URL, ENABLE_OPENAI_API,
-  # OPENAI_API_BASE_URL, OPENAI_API_KEY, ENABLE_SIGNUP, DEFAULT_USER_ROLE, TASK_MODEL*,
-  # RAG_EMBEDDING_*) are "PersistentConfig" — read on first launch then stored in the DB. After the
-  # first deploy they are managed in the UI/DB, so changing them here later has no effect unless the
-  # data volume is wiped. They seed sane first-run defaults; on an existing instance the same change
-  # must ALSO be made in Admin Settings, under the panel that owns the setting (Connections for the
-  # connection vars, Interface for TASK_MODEL*, Documents for RAG_EMBEDDING_*).
+  # PersistentConfig env vars seed a new database only. On existing instances,
+  # update Connections, Interface (TASK_MODEL*), and Documents (RAG*) in the UI.
   open-webui:
     container_name: open-webui
     image: ghcr.io/open-webui/open-webui:v0.12.0@sha256:1565038903151ced924b5a3226f73f40f16963df4b910441f6391f10144afdaa
@@ -108,37 +92,20 @@ services:
       - TZ=${TZ}
       - ENABLE_ADMIN_CHAT_ACCESS=false
       - ENABLE_OLLAMA_API=false
-      # Public URL, used for share links / OAuth redirects / notifications.
       - WEBUI_URL=https://${OPEN_WEBUI_FQDN}
-      # Chat traffic goes through Open WebUI's OpenAI-compatible client, pointed at LiteLLM's
-      # internal endpoint. LiteLLM exposes stable profile names backed by llama-swap.
-      # Open WebUI's legacy native-model middleware mangles a turn that returns MULTIPLE tool
-      # calls (it concatenates them into one malformed call), which makes athena-mcp error out and
-      # the chat hang. Its OpenAI code path handles multi-tool turns correctly. Same server, same
-      # model — just the working handler.
-      # ⚠️ OPENAI_API_BASE_URL MUST stay pinned to the internal gateway. Enabling the OpenAI API without
-      # it makes Open WebUI default to https://api.openai.com — i.e. family chats leaving the house.
-      # This stack never talks to an external model provider; do not "clean up" this URL.
+      # The native model client corrupts multi-tool turns. Pin the OpenAI client
+      # to internal LiteLLM; without this URL it defaults to a public provider.
       - ENABLE_OPENAI_API=true
       - OPENAI_API_BASE_URL=http://litellm:4000/v1
       - OPENAI_API_KEY=${LITELLM_OPEN_WEBUI_API_KEY}
-      # The global signed forwarded-user JWT below remains enabled for Athena MCP. This connection
-      # blanks that JWT and its PII-bearing fallback headers before reaching LiteLLM, then supplies
-      # only the opaque, server-substituted Open WebUI user id for per-member usage reporting. Trust
-      # it only together with the dedicated open-webui virtual key.
+      # Strip identity headers before LiteLLM; only the dedicated virtual key
+      # may attest Open WebUI's server-substituted opaque user ID.
       - 'OPENAI_API_CONFIGS={"0":{"headers":{"X-OpenWebUI-User-Jwt":"","X-OpenWebUI-User-Name":"","X-OpenWebUI-User-Id":"","X-OpenWebUI-User-Email":"","X-OpenWebUI-User-Role":"","x-litellm-end-user-id":"{{USER_ID}}"}}}'
-      # Family instance: no public self-registration — the admin provisions each account
-      # (Admin Settings -> Users -> Add User). NOTE: the very first account to register still
-      # becomes the admin (initial-admin signup intentionally bypasses this flag), so create
-      # yours promptly on first launch before exposing it externally.
+      # Claim the first admin account before exposing a fresh instance;
+      # initial-admin signup bypasses ENABLE_SIGNUP=false.
       - ENABLE_SIGNUP=false
-      # Defense in depth: any account that does get created lands in 'pending' and cannot use
-      # the app (no model access) until an admin approves it.
       - DEFAULT_USER_ROLE=pending
-      # Use the small/fast model for background tasks (title/tag/query generation) so the large chat
-      # model isn't burned on trivia.
-      # Background tasks and RAG use dedicated LiteLLM aliases so Open WebUI has no direct
-      # connection to the unauthenticated serving layer.
+      # Background tasks and RAG use authenticated LiteLLM aliases.
       - TASK_MODEL=
       - TASK_MODEL_EXTERNAL=${OPEN_WEBUI_TASK_MODEL_EXTERNAL}
       - RAG_EMBEDDING_ENGINE=openai
@@ -148,19 +115,9 @@ services:
       # Athena MCP provides web tools, so Open WebUI's native web search is disabled.
       # This is PersistentConfig: existing instances must also disable it in the UI.
       - ENABLE_WEB_SEARCH=false
-      # --- Single sign-on via Authelia (OIDC), enforced SSO-only: Authelia is the sole login path.
-      # OAUTH_AUTO_REDIRECT sends the login page straight to Authelia; ENABLE_LOGIN_FORM=false removes
-      # the local username/password form. Existing accounts match their Authelia identity by email;
-      # new OAuth logins land in DEFAULT_USER_ROLE=pending for admin approval (defense in depth). The
-      # discovery URL reaches Authelia over the public FQDN (NAT hairpin, no extra_hosts). The
-      # OPENID_REDIRECT_URI pins the callback explicitly (from ${OPEN_WEBUI_FQDN}) so it always matches
-      # the client's redirect_uris in services/authelia/configuration.yml. The oauth.* vars (incl.
-      # OAUTH_AUTO_REDIRECT) are re-read from env each startup (ENABLE_OAUTH_PERSISTENT_CONFIG=false).
-      # ENABLE_LOGIN_FORM is the exception: PersistentConfig, read from env only at a fresh instance's
-      # FIRST launch then frozen in the DB — set here so a from-scratch instance is SSO-only, but on an
-      # already-initialized instance it must ALSO be toggled off in Admin Settings -> Auth. Break-glass
-      # if Authelia is down: re-enable the form in Admin Settings (needs a live admin session) or in
-      # Open WebUI's DB. See services/authelia/README.md.
+      # OAuth vars are read at startup; ENABLE_LOGIN_FORM is PersistentConfig.
+      # On existing instances disable local login in Admin Settings -> Auth,
+      # or it bypasses SSO. See services/authelia/README.md for recovery.
       - ENABLE_OAUTH_SIGNUP=true
       - OAUTH_MERGE_ACCOUNTS_BY_EMAIL=true
       - OAUTH_PROVIDER_NAME=Authelia
@@ -171,19 +128,11 @@ services:
       - OAUTH_CLIENT_ID=open-webui
       - OAUTH_CLIENT_SECRET=${OPEN_WEBUI_OIDC_CLIENT_SECRET}
       - OAUTH_SCOPES=openid email profile
-      # Forward the signed-in user's identity to MCP/OpenAPI tools so a tool can act as that user
-      # (e.g. athena-mcp's per-user Vikunja tasks). Open WebUI mints a short-lived HS256 JWT in the
-      # `X-OpenWebUI-User-Jwt` header; athena-mcp verifies it with the SAME secret and maps the email
-      # to that user's backend token. Secret must match on both sides and be >=32 chars.
+      # Athena MCP verifies this forwarded identity JWT with the same secret.
       - ENABLE_FORWARD_USER_INFO_HEADERS=true
       - FORWARD_USER_INFO_HEADER_JWT_SECRET=${OPEN_WEBUI_FORWARD_USER_JWT_SECRET}
-      # OWUI mints this JWT once per chat turn (when it connects to the MCP server) and reuses it for
-      # every tool call in that turn without refreshing it mid-turn. The default TTL is 300s (5 min),
-      # so a turn that runs longer than that — easy with a large model on CPU — makes its later tool
-      # calls fail auth ("forwarded identity token failed validation"), leaving the request spinning.
-      # Raise the TTL to comfortably outlive any single turn (1 hour is plenty — the token only needs
-      # to span one turn, since OWUI tears the MCP connection down when the turn ends). Internal,
-      # ai-network-only identity token (never exposed publicly), so the exact value is not security-critical.
+      # One JWT is reused for a whole chat turn; the default 300s can expire
+      # during slow inference and fail later tool calls.
       - FORWARD_USER_INFO_HEADER_JWT_EXPIRES_SECONDS=3600
     volumes:
       - ${DOCKER_APPDATA_ROOT}/open-webui:/app/backend/data
@@ -196,29 +145,18 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
-      # Generous on first boot: cold start runs DB migrations + first-run RAG setup.
       start_period: 60s
 
-  # Self-hosted SearXNG metasearch — the private web-search backend Open WebUI queries (see the
-  # web-search env on open-webui above), and the backend for Athena MCP's web_search tool. It has
-  # no auth, so it is never placed behind the public reverse proxy. It is an
-  # internal-only backend: no host port is published — consumers reach it over the `ai` network at
-  # http://searxng:8080.
+  # No authentication: SearXNG stays internal to the ai network.
   searxng:
     container_name: searxng
     image: searxng/searxng:2026.10.13-22c64b8d3@sha256:9b61996edcc679fb6665290f95fda15389a14eda6060e41a25c63ab2758f2436
     restart: unless-stopped
     environment:
       - TZ=${TZ}
-      # Instance secret. SearXNG natively lets this env var override server.secret_key, so the
-      # secret stays out of this public repo.
       - SEARXNG_SECRET=${SEARXNG_SECRET}
     volumes:
-      # Config is declarative: the committed settings.yml is mounted read-only (the secret is
-      # injected via SEARXNG_SECRET above, not stored here). Mounting a repo config file
-      # read-only mirrors services/reverse-proxy (Caddyfile) and services/webhook (hooks.json).
       - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
-      # Runtime cache (favicons, etc.) on ZFS-backed appdata so it survives container recreation.
       - ${DOCKER_APPDATA_ROOT}/searxng:/var/cache/searxng
     networks:
       - ai
@@ -239,100 +177,54 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # Athena MCP — family tools over Streamable HTTP, including homelab health, shopping lists,
-  # calendars, contacts, media, photos, tasks, weather, and protected public-web search/fetch.
-  # Open WebUI's native MCP client consumes it at http://athena-mcp:8080. Like SearXNG it
-  # has no auth, so it is never placed behind the public reverse proxy and publishes no host port —
-  # the `ai` network + LAN is the trust boundary.
-  # The image is our own, built + published by the athena-mcp repo's Forgejo CI (`dotnet publish
-  # -t:PublishContainer`, no Dockerfile) to our Forgejo OCI registry. It is PRIVATE, so this stack's
-  # pre-up hook logs the host in (`docker login`) before the pull (see the "Athena MCP" section in the README).
-  # `${CONTAINER_REGISTRY}` keeps the registry host out of this public repo; the image name + digest
-  # stay in-repo (immutable, non-sensitive), pinning tag AND digest like the other services.
+  # Unauthenticated MCP tools stay internal; pre-up logs into the private
+  # Forgejo registry before pulling this pinned image.
   athena-mcp:
     container_name: athena-mcp
-    # Pinned by tag AND digest. Renovate can't reach this private registry, so
-    # bump both by hand: get the newest tag from the athena-mcp CI publish job summary and the digest
-    # from that build's registry manifest.
+    # Renovate cannot access this registry; update tag and digest together.
     image: ${CONTAINER_REGISTRY}/david/athena-mcp:0.1.48@sha256:b1893ce62322307a5dbd7b74ca0692839f2ccafffa17e64495bb4303b1cbe763
     restart: unless-stopped
     environment:
       - TZ=${TZ}
       - ATHENA_MCP_USER_CONFIG_FILE=/run/secrets/athena-users.json
-      # Human-maintained shared knowledge stays in the external NAS config tree and is mounted
-      # read-only below. Athena validates the fixed registry/curated layout when a knowledge tool runs.
       - Knowledge__CuratedRootPath=/knowledge
-      # Beszel hub (PocketBase REST) — published on the Docker host. Auth is a read-only service
-      # account (email Identity + Password); AuthCollection defaults to `users` unless a _superusers
-      # token is needed to read every host's records. Share each new host with this account in Beszel
-      # or it is missing from list_systems (see the root README).
+      # Beszel only returns hosts shared with this read-only account.
       - Homelab__Beszel__BaseUrl=http://${DOCKER_HOST_IP}:${BESZEL_WEB_PORT}
       - Homelab__Beszel__Identity=${ATHENA_MCP_BESZEL_IDENTITY}
       - Homelab__Beszel__Password=${ATHENA_MCP_BESZEL_PASSWORD}
       - Homelab__Beszel__AuthCollection=${ATHENA_MCP_BESZEL_AUTH_COLLECTION:-users}
-      # Scrutiny web API — published on the Docker host, no auth (internal-only).
       - Homelab__Scrutiny__BaseUrl=http://${DOCKER_HOST_IP}:${SCRUTINY_WEB_PORT}
-      # Proxmox VE API — self-signed cert (AllowInsecureTls trusts it for this client only). Auth is
-      # a read-only PVEAuditor API token; the user AND the token both need the role (privsep — see
-      # the root README).
+      # Proxmox self-signed TLS is trusted for this client only; both the
+      # token and its user need PVEAuditor under privilege separation.
       - Homelab__Proxmox__BaseUrl=https://${PROXMOX_IP}:${PROXMOX_WEB_PORT}
       - Homelab__Proxmox__Node=${ATHENA_MCP_PROXMOX_NODE}
       - Homelab__Proxmox__ApiTokenId=${ATHENA_MCP_PROXMOX_TOKEN_ID}
       - Homelab__Proxmox__ApiTokenSecret=${ATHENA_MCP_PROXMOX_TOKEN_SECRET}
       - Homelab__Proxmox__AllowInsecureTls=true
-      # Koffan shopping-list REST API — the koffan service is its own compose project on a separate
-      # network, so reach it via the host's published port (like Beszel/Scrutiny), not a service name.
-      # ApiToken is Koffan's REST token (reused from the koffan service's own KOFFAN_API_TOKEN).
+      # Other Compose networks are reached through published host ports.
       - Apps__Koffan__BaseUrl=http://${DOCKER_HOST_IP}:${KOFFAN_HTTP_PORT}
       - Apps__Koffan__ApiToken=${KOFFAN_API_TOKEN}
-      # Open WebUI's forwarded identity remains ordinary configuration. The canonical roster and
-      # per-user provider credentials come only from the mounted JSON snapshot below.
       - Identity__ForwardedUserJwtSecret=${OPEN_WEBUI_FORWARD_USER_JWT_SECRET}
-      # Per-user Home Assistant state and curated exact-target actions. Reads and resolution stay
-      # inside HA's Assist-exposed set; writes require one exact non-group target, a short-lived proof
-      # bound to the authenticated Open WebUI user/chat/message, and the message's single action slot.
-      # The denylist remains ordinary configuration and uses the application's scalar JSON-array
-      # representation so an empty list is unambiguous.
+      # Home Assistant writes require an exact target, short-lived proof, and
+      # one action per turn; the denied IDs are a JSON array.
       - Apps__HomeAssistant__BaseUrl=http://${HOMEASSISTANT_IP}:${HOMEASSISTANT_HTTP_PORT}
       - Apps__HomeAssistant__TargetProofLifetimeSeconds=${ATHENA_MCP_HOMEASSISTANT_TARGET_PROOF_LIFETIME_SECONDS:-90}
       - 'Apps__HomeAssistant__DeniedEntityIds=${ATHENA_MCP_HOMEASSISTANT_DENIED_ENTITY_IDS}'
       - Apps__Vikunja__BaseUrl=http://${DOCKER_HOST_IP}:${VIKUNJA_HTTP_PORT}
-      # Per-user calendar tools (list_events/add_event/delete_event), gated by the same forwarded
-      # identity: the JWT is verified, then the caller's email selects their Radicale HTTP Basic
-      # credentials. Radicale is its own compose project, so reach it via the host's published port
-      # (same-origin, not the public FQDN). BaseUrl is the DAV root (used to discover a user's personal
-      # calendar); FamilyCalendarUrl is the shared calendar's absolute URL.
       - Apps__Radicale__BaseUrl=http://${DOCKER_HOST_IP}:${RADICALE_HTTP_PORT}
       - Apps__Radicale__FamilyCalendarUrl=http://${DOCKER_HOST_IP}:${RADICALE_HTTP_PORT}/${ATHENA_MCP_RADICALE_FAMILY_CALENDAR_URL}
       - Apps__Radicale__FamilyContactsUrl=http://${DOCKER_HOST_IP}:${RADICALE_HTTP_PORT}/${ATHENA_MCP_RADICALE_FAMILY_CONTACTS_URL}
-      # Read-only weather tools (get_current_weather/get_weather_forecast) over US NWS + OSM Nominatim
-      # (keyless, US-only). DefaultLocation is used when a caller omits a location; the base URLs have
-      # sensible in-app defaults, so no other weather config is required.
+      # Keyless US NWS weather; the location is used when callers omit one.
       - Apps__Weather__DefaultLocation=${ATHENA_MCP_WEATHER_DEFAULT_LOCATION}
-      # Public-web tools. Search stays on the internal SearXNG service and returns at most five
-      # bounded snippets; direct fetch independently enforces Athena's public-address and response
-      # bounds. The language matches the established SearXNG search policy.
       - Apps__Searxng__BaseUrl=http://searxng:8080/
       - Apps__Searxng__Language=en
-      # The SearXNG domain filter is ordinary configuration. Blank means no filtering; the app
-      # now accepts an empty JSON-array string, so leave it unset in live config unless needed.
+      # Blank means no domain filtering.
       - 'Apps__Searxng__DomainFilterList=${ATHENA_MCP_SEARXNG_DOMAIN_FILTER_LIST}'
-      # Per-user media tools (search_media/list_new_media/list_resume_media/recommend_media) over the
-      # family Jellyfin, gated by the same forwarded identity: the JWT is verified, then the caller's
-      # email selects their Jellyfin ACCESS TOKEN — a per-user login-minted token, NOT a Dashboard
-      # "API Key" (those are server-wide admin tokens that bypass parental controls). Acting as the
-      # user is what makes "continue watching" and the kid-safe per-account library + parental-rating
-      # views correct. Jellyfin is its own compose project, so BaseUrl reaches it via the host's
-      # published port; PublicBaseUrl is the browser-facing FQDN used only to build the clickable deep
-      # links returned by the media tools (null/omitted → no link).
+      # Per-user Jellyfin access tokens preserve parental controls; do not use
+      # server-wide Dashboard API keys.
       - Apps__Jellyfin__BaseUrl=http://${DOCKER_HOST_IP}:${JELLYFIN_HTTP_PORT}
       - Apps__Jellyfin__PublicBaseUrl=https://${JELLYFIN_FQDN}
-      # Per-user photo-search tools (search_photos/count_photos/find_people) over the family Immich,
-      # gated by the same forwarded identity: the JWT is verified, then the caller's email selects
-      # their Immich API KEY (stamped as x-api-key) — a per-user least-privilege key (asset.read,
-      # asset.statistics, person.read). Metadata only — ids/dates/people/counts + a deep link, never
-      # image bytes. Immich is its own compose project, so BaseUrl reaches it via the host's published
-      # port; PublicBaseUrl is the browser-facing FQDN used only to build the clickable deep links.
+      # Per-user least-privilege Immich keys expose metadata, not image bytes.
       - Apps__Immich__BaseUrl=http://${DOCKER_HOST_IP}:${PHOTOS_HTTP_PORT}
       - Apps__Immich__PublicBaseUrl=https://${PHOTOS_FQDN}
     volumes:
@@ -341,9 +233,7 @@ services:
     networks:
       - ai
     healthcheck:
-      # The ASP.NET runtime image has no curl/wget/bash, so the server probes its own /health
-      # endpoint via its own binary (exit 0 = healthy). See the root README. The timeout is generous
-      # because each probe spins up a fresh `dotnet` process.
+      # The runtime image has no curl/wget; the binary probes its own /health.
       test: ['CMD', 'dotnet', '/app/AthenaMcp.Server.dll', '--health-check']
       interval: 30s
       timeout: 10s

@@ -1,55 +1,18 @@
 #!/bin/bash
 # Module: configure-nvidia-driver
 #
-# Installs the NVIDIA driver on this host and keeps it working across kernel
-# upgrades, so a re-pave restores it instead of leaving it as a hand-install
-# nobody remembers.
-#
-# Install source is NVIDIA's CUDA apt repository, chosen because the
-# alternatives don't hold up here: Debian's packaged driver lives in the
-# non-free component, which is not enabled, and lags too far behind to build
-# against a current Proxmox kernel; the .run installer isn't reproducible from a
-# re-pave. The CUDA repo is apt-managed, rebuilds via DKMS on kernel upgrade,
-# and — decisively — publishes the same driver version for several Debian
-# releases at once, which is what lets a host and a container running a
-# different Debian release agree on a version. That agreement is not optional:
-# a container's userspace driver talks to the host's kernel module, and a
-# mismatch fails with a confusing "Driver/library version mismatch".
-#
-# The package set is deliberately minimal and headless. The nvidia-open and
-# cuda-drivers metapackages pull nvidia-settings, nvidia-xconfig and
-# xserver-xorg-video-nvidia, none of which belong on a hypervisor, so the two
-# packages that actually matter are named directly:
-#   nvidia-kernel-open-dkms  the kernel modules (open flavour, which is what
-#                            NVIDIA supports for Turing and later)
-#   nvidia-driver-cuda       CUDA userspace; it Provides nvidia-smi and pulls in
-#                            nvidia-modprobe and nvidia-persistenced
-#
-# nvidia-drm modesetting is deliberately NOT enabled: this host serves compute
-# and passes the cards to containers, and modesetting only matters for driving a
-# display. It is worth being precise about what that does and doesn't buy,
-# because /dev/dri numbering matters here — an integrated GPU owns the lowest
-# DRM node, and container hardware transcoding is pinned to that node by path.
-# Leaving modesetting off is NOT what protects that numbering; the NVIDIA DRM
-# module registers render nodes either way. What protects it is load order: the
-# integrated driver is listed in /etc/modules and so is loaded before these
-# cards are probed. Verify the mapping after any change with
-# /dev/dri/by-path rather than assuming it held.
-#
-# Two things here only take effect on the next boot: the nouveau blacklist
-# (nouveau claims the cards at boot and cannot be swapped out from under a
-# running console) and, consequently, the driver itself. This module never
-# reboots — it reports whether one is still pending.
+# Use NVIDIA's CUDA apt repo so DKMS survives kernel upgrades and host/LXC
+# packages can share an exact version across Debian releases. Install only
+# the headless kernel and CUDA packages, not display metapackages.
+# DRM node numbering depends on integrated-GPU load order, not NVIDIA
+# modesetting; verify /dev/dri/by-path after changes. Blacklisting nouveau
+# takes effect after reboot; this module reports but never performs one.
 #
 # Env vars:
 #   REPO_DIR              (required, set by setup.sh) repo path on this host
-#   NVIDIA_DRIVER_VERSION (optional) exact apt version to install and hold, e.g.
-#                         "610.43.02-1". Empty installs whatever the repo offers
-#                         and reports it, which is fine for a single host but
-#                         drifts apart from a container's userspace over time —
-#                         so pin it once both sides are up.
-#   NVIDIA_POWER_LIMIT_WATTS (optional) per-GPU power cap re-applied on every
-#                         boot. Empty leaves the cards at their stock limit.
+#   NVIDIA_DRIVER_VERSION (optional) exact apt version shared with GPU LXCs;
+#                         empty uses each machine's repo version.
+#   NVIDIA_POWER_LIMIT_WATTS (optional) persistent per-GPU cap; empty leaves stock limit.
 
 set -euo pipefail
 
@@ -72,15 +35,9 @@ die() {
     exit 1
 }
 
-# A pipeline whose reader stops early — grep -q on a match, awk on exit — kills
-# the writer upstream with SIGPIPE, and `set -o pipefail` then reports that as
-# the pipeline's status. So piping a command straight into one of those turns a
-# *successful* match into a non-zero result: an available version reads as
-# unavailable, a loaded module reads as absent. The helpers below capture the
-# output first and match against it, which is why none of them pipe directly.
+# Capture command output before grep -q/awk: early reader exit raises SIGPIPE
+# under pipefail and can turn a successful match into a false negative.
 
-# The candidate version apt would install, or "(none)" when the package isn't
-# reachable from any configured source.
 apt_candidate() {
     local policy
     policy=$(apt-cache policy "$1" 2>/dev/null) || policy=""
@@ -96,14 +53,12 @@ apt_available() {
     [ -n "$candidate" ] && [ "$candidate" != "(none)" ]
 }
 
-# Whether the configured sources offer this exact version of a package.
 apt_offers_version() {
     local versions
     versions=$(apt-cache madison "$1" 2>/dev/null) || return 1
     grep -qF " $2 " <<< "$versions"
 }
 
-# The versions the configured sources do offer, newest first, for error messages.
 apt_offered_versions() {
     local versions
     versions=$(apt-cache madison "$1" 2>/dev/null) || return 0

@@ -1,16 +1,14 @@
 # NVIDIA power-limit tuning
 
-`configure-nvidia-driver.sh` can persist one power limit across all NVIDIA GPUs
-on a host:
+`configure-nvidia-driver.sh` persists one cap across host GPUs:
 
 ```bash
 NVIDIA_POWER_LIMIT_WATTS=250
 ```
 
-The module writes the limit into `homelab-nvidia.service`, enables NVIDIA
-persistence mode, applies the setting after the driver is ready and before
-Proxmox guests start, and reads the effective limit back. An empty value removes
-the cap from the unit and leaves each card at its firmware default.
+The module applies it before guests start and verifies readback. Empty removes
+the cap from the unit; it does not reset an already active limit until reboot
+(see [Rollback](#roll-back)).
 
 Changing this value and running setup changes the live GPU limit when the NVIDIA
 driver is already loaded. Treat that as an operator-approved production change,
@@ -18,10 +16,8 @@ not as a passive configuration check.
 
 ## Choosing a limit
 
-Do not infer a limit from a card's TDP alone. The useful knee changes with the
-model, serving engine, topology, request shape, cooling and other chassis load.
-For two air-cooled RTX 3090s, public measurements support this bounded starting
-matrix:
+Do not infer a limit from TDP alone; serving workload, topology, cooling, and
+other chassis load matter. For two air-cooled RTX 3090s, start with:
 
 | Limit per card | What it tests |
 |---:|---|
@@ -29,22 +25,15 @@ matrix:
 | 250 W | Balanced starting point for mixed decode and prefill-heavy work |
 | 290 W | Upper point for single-card dense-model decode and unmeasured GPU workloads |
 
-These are candidates, not universal defaults. Published measurements place a
-dual-card tensor-parallel decode knee at or below 220 W/card, an RTX 3090
-prefill-efficiency knee near 250 W, and a single-card dense decode knee near
-290 W. Image generation and VLM serving do not have comparable power-cap data,
-so include their real workflows before selecting a final value.
+These are measurement candidates, not defaults. Image generation and VLM
+serving need their own measurements before selecting a limit.
 
-When a UPS protects the host, size against its watt rating and whole-system load,
-not the PSU nameplate or GPU limits added together. A practical local policy is:
+Size against whole-system UPS load, not the PSU or summed GPU limits:
 
 - sustained UPS load at or below 80%, or the configured warning threshold when
   it is lower;
 - no observed sample above 90%, preserving a separate transient margin;
 - no UPS overload, transfer, communication or battery alarms.
-
-The 80% target follows UPS manufacturer sizing guidance. The 90% ceiling is an
-operational guardrail, not a claim about the UPS's trip point.
 
 ## Approval-gated measurement matrix
 

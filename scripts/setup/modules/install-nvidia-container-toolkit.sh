@@ -1,49 +1,17 @@
 #!/bin/bash
 # Module: install-nvidia-container-toolkit
 #
-# Gives a Docker host that is itself a guest — an LXC whose hypervisor owns the
-# NVIDIA kernel driver — what it needs to hand GPUs to its own containers: a
-# matching userspace driver, plus the NVIDIA Container Toolkit that injects that
-# driver into each container at run time.
-#
-# The kernel module deliberately stays on the hypervisor; only one thing can own
-# the hardware, and the device nodes arrive here by passthrough. What has to
-# exist on this side is the userspace half, at the *same version* as the host's
-# module — the userspace library talks to that module directly, and a mismatch
-# fails with the singularly unhelpful "Failed to initialize NVML: Driver/library
-# version mismatch". That is why NVIDIA_DRIVER_VERSION is a shared setting
-# rather than something each side resolves for itself; the host and this guest
-# usually run different Debian releases, so "install the latest" would drift
-# them apart. NVIDIA publishes the same driver version for several Debian
-# releases at once, which is what makes agreeing on one possible.
-#
-# nvidia-driver-cuda is the userspace-only package — it Provides nvidia-smi and
-# depends on no kernel module. --no-install-recommends is load-bearing rather
-# than tidiness: libcuda1 *Recommends* the DKMS package, so without it apt would
-# cheerfully start building a kernel module inside a container, where it cannot
-# work and has nothing to bind to.
-#
-# no-cgroups is turned on because the toolkit's default is to write device
-# cgroup rules itself, which it cannot do from inside a container whose cgroups
-# the hypervisor delegates. Nothing is lost by disabling it here: access to the
-# devices is already gated one level up, by the container's own device cgroup.
-#
-# This module is a no-op — loudly — when it can't do its job: no NVIDIA device
-# nodes, no Docker yet, or a driver mismatch. That is deliberate. It runs inside
-# a container whose setup is itself driven from the hypervisor, so a non-zero
-# exit aborts not just the rest of this machine's services but the hypervisor's
-# loop over its other guests. The device nodes in particular only appear once
-# the hypervisor has its driver loaded and has passed them in, which on a first
-# run is one reboot away. Anything that actually requests a GPU fails loudly on
-# its own, so nothing is hidden by warning here.
+# The LXC uses the host's kernel driver and passed-through device nodes. Its
+# userspace NVIDIA driver must match the host version across Debian releases.
+# Install without Recommends: libcuda1 otherwise pulls DKMS into the LXC.
+# The toolkit cannot manage cgroups inside the guest; the host already gates
+# device access. Missing Docker/devices or a mismatch is a warning, not fatal:
+# failing this module would abort the host's setup cascade for other guests.
 #
 # Env vars:
 #   REPO_DIR              (required, set by setup.sh) repo path on this host
-#   NVIDIA_DRIVER_VERSION (optional but strongly recommended) exact apt version
-#                         of the userspace driver, e.g. "610.43.02-1". MUST be
-#                         the same value the hypervisor uses. Empty installs
-#                         whatever this machine's repo offers, which is only
-#                         safe if it happens to match the host.
+#   NVIDIA_DRIVER_VERSION (optional) exact version shared with the host;
+#                         empty uses this machine's repo version.
 
 set -euo pipefail
 
@@ -68,12 +36,8 @@ die() {
     exit 1
 }
 
-# A pipeline whose reader stops early — grep -q on a match, awk on exit — kills
-# the writer upstream with SIGPIPE, and `set -o pipefail` then reports that as
-# the pipeline's status. So piping a command straight into one of those turns a
-# *successful* match into a non-zero result: an available version reads as
-# unavailable, an installed package reads as absent. The helpers below capture
-# the output first and match against it, which is why none of them pipe directly.
+# Capture command output before grep -q/awk: early reader exit raises SIGPIPE
+# under pipefail and can turn a successful match into a false negative.
 
 apt_candidate() {
     local policy
@@ -81,14 +45,12 @@ apt_candidate() {
     awk '/Candidate:/ { print $2; exit }' <<< "$policy"
 }
 
-# Whether the configured sources offer this exact version of a package.
 apt_offers_version() {
     local versions
     versions=$(apt-cache madison "$1" 2>/dev/null) || return 1
     grep -qF " $2 " <<< "$versions"
 }
 
-# The versions the configured sources do offer, newest first, for error messages.
 apt_offered_versions() {
     local versions
     versions=$(apt-cache madison "$1" 2>/dev/null) || return 0

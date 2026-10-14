@@ -1,48 +1,16 @@
 #!/bin/bash
 # Module: configure-storage-health
 #
-# Host-level (Proxmox host) storage-health scheduling for the ZFS pool and its
-# physical drives. The pool and disks are owned by the bare-metal host, so this is a
-# host concern (not an LXC one).
-#
-# Installs and configures, idempotently:
-#   - smartmontools (smartd): drive-health/attribute monitoring on ALL drives
-#     (reallocated/pending sectors, failed self-test, health fail, temperature),
-#     plus scheduled SMART self-tests when SMART_SELFTEST_SCHEDULE is set. smartd
-#     logs any degradation to syslog/journal (default behavior).
-#   - systemd timer to scrub the ZFS pool (homelab-zfs-scrub) when ZFS_SCRUB_SCHEDULE
-#     is set, with a post-scrub health check.
-#   - systemd timer for a ZFS pool health check (homelab-zfs-health-check) when
-#     ZFS_HEALTH_CHECK_SCHEDULE is set, catching faults/errors between scrubs.
-#
-# Detection only: problems surface via smartd's syslog/journal logging (SMART) and a
-# failed systemd unit + journal output (ZFS health check / scrub). Active push
-# notifications are intentionally deferred until the homelab alerting backend is
-# chosen (separate todo).
-#
-# Schedule semantics: each scheduled feature is gated by its schedule env var. A
-# NON-EMPTY value enables the feature on that schedule; an EMPTY (or unset) value
-# DISABLES it (and removes any previously-installed unit). The recommended default
-# schedules live in .env.template — clear a value there to opt out of that feature.
-# (smartd itself always runs for monitoring; SMART_SELFTEST_SCHEDULE only controls
-# whether it also schedules self-tests.)
-#
-# Idempotent: generated configs/units are compared (cmp) before replacing, and
-# services/timers are only (re)started when something actually changed.
+# Host owns ZFS and SMART tests. Empty schedules remove their timers; smartd
+# still monitors drive health without scheduled self-tests. Default schedules
+# are in .env.template.
 #
 # Env vars:
 #   ZFS_POOL                  (required) pool to scrub and monitor
 #   REPO_DIR                  (required, set by setup.sh) repo path on this host
-#   SMART_SELFTEST_SCHEDULE   smartd `-s` test schedule regex; empty = no self-tests.
-#                             Recommended: (S/../.././02|L/../15/./03)
-#                             = short self-test daily 02:00, long monthly on the 15th
-#                             at 03:00. Long tests are slow on large drives (tens of
-#                             hours on a multi-TB drive), so monthly — not weekly — keeps
-#                             load sane.
-#   ZFS_SCRUB_SCHEDULE        systemd OnCalendar for the scrub; empty = no scheduled
-#                             scrub. Recommended: Sun *-*-01..07 03:00:00 (1st Sunday).
-#   ZFS_HEALTH_CHECK_SCHEDULE systemd OnCalendar for the health check; empty = none.
-#                             Recommended: *-*-* 08:00:00 (daily).
+#   SMART_SELFTEST_SCHEDULE   smartd -s regex; empty disables tests
+#   ZFS_SCRUB_SCHEDULE        systemd OnCalendar; empty disables scrub
+#   ZFS_HEALTH_CHECK_SCHEDULE systemd OnCalendar; empty disables health checks
 
 set -euo pipefail
 
