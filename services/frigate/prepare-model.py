@@ -145,7 +145,7 @@ def main():
                 opset=args.opset,
                 dynamic=False,
                 simplify=False,
-                nms=False,
+                nms=None,  # Preserve raw outputs for Frigate's external NMS.
                 batch=1,
                 device="cpu",
             )

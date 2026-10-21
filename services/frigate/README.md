@@ -13,7 +13,7 @@ belong in native YAML.
 ## Model preparation
 
 Optional pre-deploy preparation supports Ultralytics YOLO checkpoints compatible
-with Frigate's `yolo-generic` model type and requires Python 3.11 or 3.12.
+with Frigate's `yolo-generic` model type and requires Python 3.11 through 3.13.
 Acquisition settings are listed in [`.env.template`](../../.env.template).
 
 Point native `model.path` and `model.labelmap_path` at `model.onnx` and

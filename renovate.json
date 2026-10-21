@@ -50,6 +50,56 @@
       "groupName": "beszel"
     },
     {
+      "description": "Update the Frigate CPU model-export toolchain together",
+      "matchManagers": [
+        "pip_requirements"
+      ],
+      "matchFileNames": [
+        "services/frigate/requirements-model.txt"
+      ],
+      "groupName": "frigate model toolchain",
+      "separateMajorMinor": false
+    },
+    {
+      "description": "Keep Frigate model preparation compatible with Python 3.11",
+      "matchManagers": [
+        "pip_requirements"
+      ],
+      "matchFileNames": [
+        "services/frigate/requirements-model.txt"
+      ],
+      "matchPackageNames": [
+        "numpy"
+      ],
+      "allowedVersions": "<2.5"
+    },
+    {
+      "description": "Keep the Frigate model verifier aligned with Frigate's ONNX Runtime 1.22.x",
+      "matchManagers": [
+        "pip_requirements"
+      ],
+      "matchFileNames": [
+        "services/frigate/requirements-model.txt"
+      ],
+      "matchPackageNames": [
+        "onnxruntime"
+      ],
+      "allowedVersions": "<1.23"
+    },
+    {
+      "description": "Keep Frigate model preparation on OpenCV 4",
+      "matchManagers": [
+        "pip_requirements"
+      ],
+      "matchFileNames": [
+        "services/frigate/requirements-model.txt"
+      ],
+      "matchPackageNames": [
+        "opencv-python"
+      ],
+      "allowedVersions": "<5"
+    },
+    {
       "description": "SearXNG follows Docker Hub's latest alias through the custom datasource",
       "matchManagers": [
         "docker-compose"

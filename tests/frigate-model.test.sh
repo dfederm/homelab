@@ -106,9 +106,9 @@ class ModelPreparationTests(unittest.TestCase):
         self.model.export.assert_called_once()
         for option, expected in {
             "format": "onnx", "imgsz": self.input_size, "opset": self.opset,
-            "dynamic": False, "nms": False, "batch": 1, "device": "cpu",
+            "dynamic": False, "nms": None, "batch": 1, "device": "cpu",
         }.items():
-            self.assertEqual(self.model.export.call_args.kwargs.get(option), expected, option)
+            self.assertEqual(self.model.export.call_args.kwargs[option], expected, option)
         self.assertEqual(
             (self.output / "labelmap.txt").read_text(),
             "0 blue_heron\n1 vehicle\n",
@@ -181,7 +181,7 @@ class ModelPreparationTests(unittest.TestCase):
         preparer.verify_existing(self.output, self.digest, self.input_size, self.opset)
 
     def test_incompatible_shapes_are_not_published(self):
-        for shape in ([1, 5, 42], [1, 42, 6]):
+        for shape in ([1, 5, 42], [1, 42, 6], [1, 300, 6]):
             with self.subTest(shape=shape):
                 self.session.run.return_value = [SimpleNamespace(ndim=3, shape=shape)]
                 with self.assertRaisesRegex(SystemExit, "YOLO output shape"):
@@ -268,7 +268,7 @@ class ModelPreparationTests(unittest.TestCase):
         self.assertFalse((self.root / "escape").exists())
         self.assertFalse((self.output.parents[1] / "model-build-env").exists())
 
-    def test_hook_bootstraps_cpu_tooling_then_passes_export_settings(self):
+    def bootstrap_fixture(self):
         config, env = self.hook_fixture()
         shutil.rmtree(self.output)
         fixture_repo = self.root / "repo"
@@ -291,7 +291,9 @@ class ModelPreparationTests(unittest.TestCase):
         python3.write_text(
             '#!/bin/bash\nset -euo pipefail\n'
             'if [ "$1" = -c ]; then\n'
-            '    exit 0\n'
+            '    exec "$REAL_PYTHON" -c \\\n'
+            '        \'import sys; sys.version_info = tuple(map(int, sys.argv[1].split("."))); exec(sys.argv[2])\' \\\n'
+            '        "$FIXTURE_PYTHON_VERSION" "$2"\n'
             'elif [ "$1" = -m ] && [ "$2" = venv ]; then\n'
             '    printf "venv\\n" >> "$BOOTSTRAP_LOG"\n'
             '    mkdir -p "$3/bin"\n'
@@ -315,8 +317,35 @@ class ModelPreparationTests(unittest.TestCase):
         env.update(
             BOOTSTRAP_LOG=str(log), FAKE_VENV_PYTHON=str(venv_python),
             EXPORT_ARGS=str(export_args),
+            REAL_PYTHON=sys.executable, FIXTURE_PYTHON_VERSION="3.13",
             PATH=f'{bin_dir}{os.pathsep}{env["PATH"]}',
         )
+        return fixture_repo, env, log, export_args
+
+    def test_hook_checks_supported_python_before_installation(self):
+        fixture_repo, env, log, _ = self.bootstrap_fixture()
+        for version, supported in [
+            ("3.10", False), ("3.11", True), ("3.12", True),
+            ("3.13", True), ("3.14", False),
+        ]:
+            with self.subTest(version=version):
+                log.write_text("")
+                env["FIXTURE_PYTHON_VERSION"] = version
+                result = subprocess.run(
+                    ["bash", str(fixture_repo / "services/frigate/pre-up.sh")],
+                    env=env, capture_output=True, text=True,
+                )
+                if supported:
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertIn("prepare\n", log.read_text())
+                else:
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("requires Python 3.11 through 3.13", result.stderr)
+                    self.assertEqual(log.read_text(), "")
+
+    def test_hook_bootstraps_cpu_tooling_then_passes_export_settings(self):
+        fixture_repo, env, log, export_args = self.bootstrap_fixture()
+        requirements = fixture_repo / "services/frigate/requirements-model.txt"
         result = subprocess.run(
             ["bash", str(fixture_repo / "services/frigate/pre-up.sh")],
             env=env, capture_output=True, text=True,

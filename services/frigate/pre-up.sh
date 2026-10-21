@@ -67,8 +67,8 @@ if [ -d "$model_dir" ] \
     exit 0
 fi
 
-if ! python3 -c 'import sys; sys.exit(0 if (3, 11) <= sys.version_info[:2] <= (3, 12) else 1)'; then
-    echo "ERROR: model conversion requires Python 3.11 or 3.12" >&2
+if ! python3 -c 'import sys; sys.exit(0 if (3, 11) <= sys.version_info[:2] <= (3, 13) else 1)'; then
+    echo "ERROR: model conversion requires Python 3.11 through 3.13" >&2
     exit 1
 fi
 
