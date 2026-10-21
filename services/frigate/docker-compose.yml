@@ -1,0 +1,64 @@
+services:
+  mqtt:
+    container_name: frigate-mqtt
+    image: eclipse-mosquitto:2.0.22@sha256:199ea8ef2e35ec2b1b37e59cfd1dbae538ed4dfa4a2251a121a52215a6248a21
+    restart: unless-stopped
+    user: "0:0"
+    environment:
+      - TZ=${TZ}
+      - FRIGATE_MQTT_USER=${FRIGATE_MQTT_USER}
+      - FRIGATE_MQTT_PASSWORD=${FRIGATE_MQTT_PASSWORD}
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ${CONFIG_DIR}/frigate/mosquitto/passwords:/mosquitto/config/passwords:ro
+      - ${DOCKER_APPDATA_ROOT}/frigate/mqtt:/mosquitto/data
+    ports:
+      - '${DOCKER_HOST_IP}:${FRIGATE_MQTT_PORT}:1883'
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          mosquitto_sub -h 127.0.0.1 -p 1883
+          -u "$$FRIGATE_MQTT_USER" -P "$$FRIGATE_MQTT_PASSWORD"
+          -t '$$SYS/broker/uptime' -C 1 -W 5 >/dev/null
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  frigate:
+    container_name: frigate
+    image: ghcr.io/blakeblackshear/frigate:0.18.0@sha256:9678a83a76e4730ac7d9ea7428370e32ae656d6b312aaad30d6c69f3fef14d35
+    restart: unless-stopped
+    depends_on:
+      mqtt:
+        condition: service_healthy
+    shm_size: ${FRIGATE_SHM_SIZE:-256m}
+    tmpfs:
+      - /tmp/cache:rw,size=${FRIGATE_CACHE_SIZE:-1g}
+    environment:
+      - TZ=${TZ}
+      - NVIDIA_VISIBLE_DEVICES=void
+      - CUDA_VISIBLE_DEVICES=
+      - FRIGATE_MQTT_USER=${FRIGATE_MQTT_USER}
+      - FRIGATE_MQTT_PASSWORD=${FRIGATE_MQTT_PASSWORD}
+    devices:
+      - ${FRIGATE_GPU_DEVICE}:/dev/dri/renderD128
+    volumes:
+      - ${CONFIG_DIR}/frigate/config:/config
+      - ${DOCKER_APPDATA_ROOT}/frigate/data:/data
+      - ${DOCKER_APPDATA_ROOT}/frigate/model_cache:/config/model_cache
+      - ${DOCKER_APPDATA_ROOT}/frigate/media:/media/frigate
+      - ${DOCKER_APPDATA_ROOT}/frigate/exports:/media/frigate/exports
+    ports:
+      - '${DOCKER_HOST_IP}:${FRIGATE_HTTP_PORT}:8971'
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

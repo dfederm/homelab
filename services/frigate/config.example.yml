@@ -1,0 +1,44 @@
+version: 0.18-0
+
+mqtt:
+  enabled: true
+  host: mqtt
+  port: 1883
+  user: "{FRIGATE_MQTT_USER}"
+  password: "{FRIGATE_MQTT_PASSWORD}"
+
+auth:
+  enabled: true
+tls:
+  enabled: true
+
+database:
+  path: /data/frigate.db
+
+detectors:
+  cpu:
+    type: cpu
+
+detect:
+  width: 1280
+  height: 720
+
+go2rtc:
+  streams:
+    camera: "rtsp://<username>:<password>@<camera-host>:<rtsp-port>/<main-stream>"
+    camera_sub: "rtsp://<username>:<password>@<camera-host>:<rtsp-port>/<sub-stream>"
+
+cameras:
+  camera:
+    ffmpeg:
+      inputs:
+        - path: rtsp://127.0.0.1:8554/camera
+          input_args: preset-rtsp-restream
+          roles: [record]
+        - path: rtsp://127.0.0.1:8554/camera_sub
+          input_args: preset-rtsp-restream
+          roles: [detect]
+    live:
+      streams:
+        Main: camera
+        Sub: camera_sub

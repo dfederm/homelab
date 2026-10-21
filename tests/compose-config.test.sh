@@ -26,6 +26,16 @@ if not compose_files:
     raise SystemExit("no Compose files found")
 
 image_pattern = re.compile(r":[^/@]+@sha256:[0-9a-f]{64}$")
+writable_config_mount_exceptions = {
+    ("frigate", "frigate", "${CONFIG_DIR}/frigate/config", "/config"): (
+        "Frigate writes UI configuration, migration backups, authentication signing "
+        "secrets, and maintenance state into its native configuration directory."
+    ),
+}
+for mount, reason in writable_config_mount_exceptions.items():
+    if not reason.strip():
+        raise SystemExit(f"writable config mount exception needs an explanation: {mount}")
+used_config_mount_exceptions = set()
 
 for path in compose_files:
     try:
@@ -68,21 +78,35 @@ for path in compose_files:
         for volume in service.get("volumes", []):
             if isinstance(volume, str):
                 fields = volume.rsplit(":", 2)
-                source = fields[0]
-                if source == "${CONFIG_DIR}" or source.startswith("${CONFIG_DIR}/"):
-                    if len(fields) != 3 or "ro" not in fields[2].split(","):
-                        raise SystemExit(
-                            f"{location} must mount external configuration read-only: {source}"
-                        )
+                if len(fields) < 2:
+                    continue
+                source, target = fields[:2]
+                read_only = len(fields) == 3 and "ro" in fields[2].split(",")
             elif isinstance(volume, dict):
                 source = volume.get("source")
-                if isinstance(source, str) and (
-                    source == "${CONFIG_DIR}" or source.startswith("${CONFIG_DIR}/")
-                ):
-                    if volume.get("read_only") is not True:
-                        raise SystemExit(
-                            f"{location} must mount external configuration read-only: {source}"
-                        )
+                target = volume.get("target")
+                read_only = volume.get("read_only") is True
+            else:
+                continue
+
+            if not isinstance(source, str) or not (
+                source == "${CONFIG_DIR}" or source.startswith("${CONFIG_DIR}/")
+            ):
+                continue
+            if read_only:
+                continue
+
+            mount = (path.parent.name, name, source, target)
+            if mount not in writable_config_mount_exceptions:
+                raise SystemExit(
+                    f"{location} must mount external configuration read-only: "
+                    f"{source} -> {target}"
+                )
+            used_config_mount_exceptions.add(mount)
+
+unused_exceptions = set(writable_config_mount_exceptions) - used_config_mount_exceptions
+if unused_exceptions:
+    raise SystemExit(f"unused writable config mount exceptions: {sorted(unused_exceptions)}")
 
 print(f"YAML and repository invariants passed for {len(compose_files)} Compose files")
 PY

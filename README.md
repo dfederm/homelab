@@ -314,7 +314,8 @@ On a rebuild, `create-vms` imports the pinned base image (`HAOS_VM_IMAGE`) into 
 
 ## Services
 
-Each service is a Docker Compose project in `services/<name>/`. All configuration is parameterized via env vars — no hardcoded domains, IPs, or paths in compose files.
+Each service is a Docker Compose project in `services/<name>/`. Deployment values
+come from env vars; native service configuration lives outside the repo.
 
 Deploy a single service:
 ```bash
@@ -330,6 +331,12 @@ Services are defined per-machine in the env file:
 ```
 HOMELAB_SERVICES=dns,reverse-proxy,jellyfin,photos,files,monitoring,homepage,dozzle
 ```
+
+### Frigate (camera processing and recording)
+
+Frigate runs with an authenticated MQTT broker and operator-owned native camera
+configuration. See [Frigate](services/frigate/README.md) for setup and persistence
+constraints.
 
 ### Authelia (SSO)
 
