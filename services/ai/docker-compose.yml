@@ -150,7 +150,7 @@ services:
   # No authentication: SearXNG stays internal to the ai network.
   searxng:
     container_name: searxng
-    image: searxng/searxng:2026.10.16-0ce72dd2c@sha256:d7ac1a4c215ae9ea1e3e46b114aa94e4bc4e37f94e773559682491c9a18a7404
+    image: searxng/searxng:2026.10.19-81371861f@sha256:5ed0323b5f5f8701264ef65e239a2bd83cb57098f2b971fa30bf79c06eeae271
     restart: unless-stopped
     environment:
       - TZ=${TZ}
