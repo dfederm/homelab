@@ -29,6 +29,13 @@
         server: my-docker
         container: open-webui
 
+    - LiteLLM:
+        icon: mdi-robot
+        href: "{{HOMEPAGE_VAR_LITELLM_URL}}"
+        description: AI gateway administration
+        server: my-docker
+        container: litellm
+
 - Productivity:
     - Vikunja:
         icon: vikunja.png
@@ -43,6 +50,13 @@
         description: Shopping list
         server: my-docker
         container: koffan
+
+    - Radicale:
+        icon: mdi-calendar
+        href: "{{HOMEPAGE_VAR_RADICALE_URL}}"
+        description: Calendar & contacts
+        server: my-docker
+        container: radicale
 
 - Infrastructure:
     - Home Assistant:
@@ -78,6 +92,13 @@
         description: Git hosting
         server: my-docker
         container: forgejo
+
+    - Frigate:
+        icon: mdi-cctv
+        href: "{{HOMEPAGE_VAR_FRIGATE_URL}}"
+        description: Camera monitoring
+        server: my-docker
+        container: frigate
 
     - Proxmox:
         icon: proxmox.png
