@@ -1,7 +1,7 @@
 numpy==2.4.6
-onnx==1.22.0
+onnx==1.23.2
 onnxruntime==1.22.1
 opencv-python==4.14.0.94
-torch==2.13.0
-torchvision==0.28.0
+torch==2.14.1
+torchvision==0.29.1
 ultralytics==8.4.183
