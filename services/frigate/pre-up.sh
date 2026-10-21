@@ -80,6 +80,8 @@ if [ ! -x "$build_env/bin/python" ]; then
 fi
 
 python="$build_env/bin/python"
+# Debian's bundled pip rejects normalized dependency names on the CPU index.
+"$python" -m pip install --upgrade pip
 mapfile -t cpu_requirements < <(
     grep -E '^(torch|torchvision)==' "$SCRIPT_DIR/requirements-model.txt" | tr -d '\r'
 )

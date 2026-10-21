@@ -343,10 +343,16 @@ class ModelPreparationTests(unittest.TestCase):
         pip_parser = argparse.ArgumentParser(add_help=False)
         pip_parser.add_argument("-i", "--index-url")
         pip_parser.add_argument("-r", "--requirement", action="append", default=[])
+        pip_parser.add_argument("-U", "--upgrade", action="store_true")
         pip_calls = [
             (index, *pip_parser.parse_known_args(call[1:]))
             for index, call in enumerate(calls) if call[0] == "pip"
         ]
+        pip_upgrades = [
+            index for index, options, packages in pip_calls
+            if "install" in packages and options.upgrade and "pip" in packages
+        ]
+        self.assertTrue(pip_upgrades)
         requirements_calls = [
             index for index, options, packages in pip_calls
             if "install" in packages and str(requirements) in options.requirement
@@ -362,6 +368,7 @@ class ModelPreparationTests(unittest.TestCase):
                 and f"{package}=={pins[package]}" in packages
             ]
             self.assertTrue(cpu_installs, package)
+            self.assertLess(min(pip_upgrades), min(cpu_installs))
             self.assertLess(min(cpu_installs), min(requirements_calls))
         with mock.patch.object(sys, "argv", export_args.read_text().splitlines()), \
                 contextlib.redirect_stdout(io.StringIO()), \
