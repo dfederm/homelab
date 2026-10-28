@@ -3,7 +3,7 @@
 services:
   llama-swap:
     container_name: llama-swap
-    image: ghcr.io/mostlygeek/llama-swap:unified-cuda13-265@sha256:6fe60085a65acd61cc05b96a97cfe8b1c397ac84a5334c11a2598a21042a3213
+    image: ghcr.io/mostlygeek/llama-swap:unified-cuda13-268@sha256:79c30e19f6945a74e04d20f97bb73fd17dcf59063fd6e839e1732dc5ac7f9492
     restart: unless-stopped
     runtime: nvidia
     environment:
