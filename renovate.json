@@ -9,15 +9,6 @@
   "rebaseWhen": "behind-base-branch",
   "packageRules": [
     {
-      "description": "Check for Docker image updates weekly",
-      "matchDatasources": [
-        "docker"
-      ],
-      "schedule": [
-        "before 6am on monday"
-      ]
-    },
-    {
       "description": "Track llama-swap CUDA 13 releases without switching variants",
       "matchDatasources": [
         "docker"
