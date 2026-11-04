@@ -753,7 +753,7 @@ port per player (the default maximum is 10).
 The Compose service publishes both and advertises the existing `DOCKER_HOST_IP` to
 clients, so that address must be reachable from their LAN. Configure **every**
 per-world env file with a non-overlapping range before redeploying. BedrockConnect's
-menu remains on UDP 19132; its world entries retain the same address and
+menu has its own ports; its world entries retain the same address and
 `MINECRAFT_PORT`. Confirm console transfers into each world after deployment.
 These ports are for LAN play, not internet forwarding.
 
@@ -762,6 +762,16 @@ Game consoles can't enter an arbitrary server IP, so `services/bedrock-connect/`
 an unused "featured server" hostname at the Docker host, and consoles get an in-game menu of
 the worlds. The menu is defined by `custom_servers.json` in the NAS directory
 `BEDROCK_CONNECT_CONFIG` (see `services/bedrock-connect/custom_servers.example.json`).
+
+BedrockConnect runs both transports: UDP 19132 preserves legacy RakNet discovery,
+and TCP 19132 provides NetherNet signaling. Before deploying, set
+`BEDROCK_CONNECT_WEBRTC_PORT` to one unused UDP port other than 19132, outside the
+worlds' UDP ranges. This menu media port is published unchanged on the host and
+container. NetherNet advertises the LAN-reachable `DOCKER_HOST_IP` with public-address
+discovery (STUN) disabled; no internet port forwarding or DNS changes are needed.
+Its client-pinned server identity persists under
+`${DOCKER_APPDATA_ROOT}/bedrock-connect/nethernet`, while the custom menu stays read-only.
+
 Adding a world is therefore NAS-only: create its `<world>.env`, add it to `MINECRAFT_INSTANCES`,
 and add an entry to the BedrockConnect menu file.
 
