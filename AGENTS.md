@@ -81,7 +81,7 @@ When writing or modifying setup modules, use these established patterns:
 - **Simple and readable** — Prefer clear bash over clever one-liners. Comment only when the "why" isn't obvious.
 - **No secrets in the repo** — This repo is public. All sensitive values go in env files.
 - **No personal information in the repo** — Never hardcode setup-specific IPs, hostnames, usernames, domains, or paths; use env vars. Keep any details shared for troubleshooting out of committed files.
-- **Don't commit without review, don't push without explicit approval** — Leave changes unstaged for the user to review. Never auto-commit. **Push may trigger immediate deployment** if the user has configured a deploy webhook (push → webhook signals each top-level target → each worker serializes and coalesces `setup.sh`). The user may want to stack multiple commits and push as a batch to avoid deploy churn. Always wait for explicit "push" / "deploy" / "go ahead" from the user before `git push`.
+- **Don't commit to or push `main` without explicit approval** — **Pushing `main` may trigger immediate deployment** if the user has configured a deploy webhook (push → webhook signals each top-level target → each worker serializes and coalesces `setup.sh`). The user may want to stack multiple commits and push as a batch to avoid deploy churn. Always wait for explicit "push" / "deploy" / "go ahead" from the user before updating `main`. Only `main` deploys, so private topic branches can be committed and pushed normally, including to save work before pausing or handing off; opening or merging a PR still needs approval.
 - **Surgical changes** — When modifying existing files, change only what's needed. Don't reformat or restructure unrelated code.
 
 ## Testing Changes
