@@ -332,6 +332,8 @@ Services are defined per-machine in the env file:
 HOMELAB_SERVICES=dns,reverse-proxy,jellyfin,photos,files,monitoring,homepage,dozzle
 ```
 
+For portable music tags and artwork, see the [music metadata workflow](tools/music-metadata.md).
+
 ### Frigate (camera processing and recording)
 
 Frigate runs with an authenticated MQTT broker and operator-owned native camera
