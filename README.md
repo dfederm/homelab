@@ -367,9 +367,11 @@ deployment rather than silently serving on the CPU.
 Model files live under `LLAMA_MODELS_ROOT`, normally a fast volume bind-mounted into the Docker LXC.
 The operator-owned `${CONFIG_DIR}/ai/models.txt` manifest pins each public artifact by immutable
 repository revision and SHA-256. Each non-comment line uses
-`relative-path|sha256|size-in-bytes|https-url`. Before every AI deployment,
-`download-models.sh` verifies existing files and downloads only missing or corrupt artifacts.
-Downloads resume from a `.partial` file and are atomically renamed only after the checksum passes.
+`relative-path|sha256|size-in-bytes|https-url`. `download-models.sh` stores the verified checksum in
+an adjacent `<model>.sha256` receipt, so later deployments skip hashing when the receipt matches the
+manifest. Existing models without a receipt are verified once and then cached. Treat installed model
+files as immutable; remove the receipt to force a full checksum verification. Downloads resume from a
+`.partial` file and are checked against both checksum and size before atomically replacing the model.
 
 LiteLLM is the durable routing boundary between clients and llama-swap. Its model aliases and backend
 mappings are deliberately **not** committed to this repository. They live in the ZFS-backed
