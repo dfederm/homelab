@@ -57,28 +57,29 @@ mkdir "$TMP_DIR/bin" "$TMP_DIR/models"
 printf 'test model payload\n' > "$TMP_DIR/source.gguf"
 expected_sha=$(sha256sum "$TMP_DIR/source.gguf" | cut -d' ' -f1)
 expected_size=$(wc -c < "$TMP_DIR/source.gguf")
-printf '%s|%s|%s|%s\r\n' \
-    "test/model.gguf" \
-    "$expected_sha" \
-    "$expected_size" \
-    "https://example.invalid/model.gguf" \
+printf 'test/model.gguf|https://huggingface.co/example/model/resolve/main/model.gguf\r\n' \
     > "$TMP_DIR/manifest.txt"
 cat > "$TMP_DIR/bin/curl" <<'EOF'
 #!/bin/bash
 set -eu
 
+head=false
 output=
 url=
 while [ "$#" -gt 0 ]; do
     case "$1" in
+        --head)
+            head=true
+            shift
+            ;;
         --output)
             output="$2"
             shift 2
             ;;
-        --retry|--retry-delay|--continue-at)
+        --retry|--retry-delay|--continue-at|--connect-timeout|--max-time)
             shift 2
             ;;
-        --fail|--location)
+        --fail|--location|--silent|--show-error)
             shift
             ;;
         *)
@@ -88,7 +89,14 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 
-[ "$url" = "https://example.invalid/model.gguf" ]
+if [ "$head" = true ]; then
+    [ "$url" = "https://huggingface.co/example/model/resolve/main/model.gguf" ]
+    printf 'X-Repo-Commit: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r\nX-Linked-ETag: "%s"\r\nX-Linked-Size: %s\r\n' \
+        "$MOCK_METADATA_SHA" "$MOCK_METADATA_SIZE"
+    exit 0
+fi
+
+[ "$url" = "https://huggingface.co/example/model/resolve/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/model.gguf" ]
 printf 'download\n' >> "$MOCK_CURL_LOG"
 if [ "${MOCK_CURL_FAIL:-0}" -eq 1 ]; then
     exit 22
@@ -111,6 +119,7 @@ if [ "${MOCK_MV_FAIL_PARTIAL:-0}" -eq 1 ] && [[ "$source_path" == *.partial ]]; 
 fi
 if [ "${MOCK_MV_FAIL_RECEIPT:-0}" -eq 1 ] \
     && [[ "$source_path" == *.tmp.* ]] \
+    && [[ "$target_path" != *.partial.sha256 ]] \
     && [[ "$target_path" == *.sha256 ]]; then
     exit 1
 fi
@@ -127,6 +136,8 @@ run_downloader() {
     MOCK_MODEL_SOURCE="$TMP_DIR/source.gguf" \
     MOCK_CURL_LOG="$TMP_DIR/curl.log" \
     MOCK_SHA256_LOG="$TMP_DIR/sha256.log" \
+    MOCK_METADATA_SHA="${MOCK_METADATA_SHA:-$expected_sha}" \
+    MOCK_METADATA_SIZE="${MOCK_METADATA_SIZE:-$expected_size}" \
     REAL_SHA256SUM="$REAL_SHA256SUM" \
     REAL_MV="$REAL_MV" \
         bash "$DOWNLOADER" > "$TMP_DIR/download.out" 2>&1
@@ -168,21 +179,17 @@ else
 fi
 rm "$partial"
 
-printf 'test/model.gguf|%s|%s|https://example.invalid/model.gguf\n' \
-    "$expected_sha" "$((expected_size + 1))" > "$TMP_DIR/manifest.txt"
 before_downloads=$(wc -l < "$TMP_DIR/curl.log")
 : > "$TMP_DIR/sha256.log"
-if run_downloader \
+if MOCK_METADATA_SIZE="$((expected_size + 1))" run_downloader \
     && cmp -s "$TMP_DIR/source.gguf" "$model" \
     && [ "$(cat "$receipt")" = "$expected_sha" ] \
     && [ "$(wc -l < "$TMP_DIR/curl.log")" -eq "$before_downloads" ] \
     && [ ! -s "$TMP_DIR/sha256.log" ]; then
-    pass "a matching receipt is trusted even if the manifest size changes"
+    pass "a matching receipt is trusted even if the upstream size changes"
 else
-    fail "a matching receipt is trusted even if the manifest size changes"
+    fail "a matching receipt is trusted even if the upstream size changes"
 fi
-printf 'test/model.gguf|%s|%s|https://example.invalid/model.gguf\n' \
-    "$expected_sha" "$expected_size" > "$TMP_DIR/manifest.txt"
 
 rm "$receipt"
 : > "$TMP_DIR/sha256.log"
@@ -212,9 +219,7 @@ old_sha="$(cat "$receipt")"
 printf 'updated model payload with a new revision\n' > "$TMP_DIR/source.gguf"
 expected_sha=$(sha256sum "$TMP_DIR/source.gguf" | cut -d' ' -f1)
 expected_size=$(wc -c < "$TMP_DIR/source.gguf")
-printf 'test/model.gguf|%s|%s|https://example.invalid/model.gguf\n' \
-    "$expected_sha" "$((expected_size + 1))" > "$TMP_DIR/manifest.txt"
-if run_downloader; then
+if MOCK_METADATA_SIZE="$((expected_size + 1))" run_downloader; then
     fail "a downloaded model with the wrong size is rejected"
 elif cmp -s "$old_content" "$model" \
     && [ "$(cat "$receipt")" = "$old_sha" ] \
@@ -224,9 +229,6 @@ else
     fail "a downloaded model with the wrong size preserves the old model"
 fi
 
-printf '%s|%s|%s|%s\n' \
-    "test/model.gguf" "$expected_sha" "$expected_size" "https://example.invalid/model.gguf" \
-    > "$TMP_DIR/manifest.txt"
 : > "$TMP_DIR/sha256.log"
 before_downloads=$(wc -l < "$TMP_DIR/curl.log")
 if run_downloader \
@@ -234,16 +236,14 @@ if run_downloader \
     && [ "$(cat "$receipt")" = "$expected_sha" ] \
     && [ "$(wc -l < "$TMP_DIR/curl.log")" -eq "$((before_downloads + 1))" ] \
     && [ "$(wc -l < "$TMP_DIR/sha256.log")" -eq 1 ]; then
-    pass "a changed manifest downloads and replaces the old model"
+    pass "a changed upstream model is downloaded and replaces the old model"
 else
-    fail "a changed manifest downloads and replaces the old model"
+    fail "a changed upstream model is downloaded and replaces the old model"
 fi
 
 new_sha="$expected_sha"
 cp "$model" "$old_content"
-printf 'test/model.gguf|%s|%s|https://example.invalid/model.gguf\n' \
-    "$(printf '0%.0s' {1..64})" "$expected_size" > "$TMP_DIR/manifest.txt"
-if run_downloader; then
+if MOCK_METADATA_SHA="$(printf '0%.0s' {1..64})" run_downloader; then
     fail "checksum mismatches fail deployment"
 elif cmp -s "$old_content" "$model" \
     && [ "$(cat "$receipt")" = "$new_sha" ] \
@@ -257,9 +257,8 @@ cp "$model" "$old_content"
 printf 'next model revision\n' > "$TMP_DIR/source.gguf"
 expected_sha=$(sha256sum "$TMP_DIR/source.gguf" | cut -d' ' -f1)
 expected_size=$(wc -c < "$TMP_DIR/source.gguf")
-printf 'test/model.gguf|%s|%s|https://example.invalid/model.gguf\n' \
-    "$expected_sha" "$expected_size" > "$TMP_DIR/manifest.txt"
 printf 'partial transfer\n' > "$partial"
+printf '%s\n' "$expected_sha" > "$partial.sha256"
 if MOCK_CURL_FAIL=1 run_downloader; then
     fail "a failed download is reported"
 elif cmp -s "$old_content" "$model" \
@@ -281,6 +280,7 @@ fi
 new_sha="$expected_sha"
 rm "$model" "$receipt"
 cp "$TMP_DIR/source.gguf" "$partial"
+printf '%s\n' "$expected_sha" > "$partial.sha256"
 : > "$TMP_DIR/sha256.log"
 before_downloads=$(wc -l < "$TMP_DIR/curl.log")
 if run_downloader \
@@ -295,6 +295,7 @@ fi
 
 rm "$model" "$receipt"
 tr '[:lower:]' '[:upper:]' < "$TMP_DIR/source.gguf" > "$partial"
+printf '%s\n' "$expected_sha" > "$partial.sha256"
 before_downloads=$(wc -l < "$TMP_DIR/curl.log")
 : > "$TMP_DIR/sha256.log"
 if run_downloader \
@@ -311,8 +312,6 @@ cp "$model" "$third_model"
 printf 'third model revision\n' > "$TMP_DIR/source.gguf"
 expected_sha=$(sha256sum "$TMP_DIR/source.gguf" | cut -d' ' -f1)
 expected_size=$(wc -c < "$TMP_DIR/source.gguf")
-printf 'test/model.gguf|%s|%s|https://example.invalid/model.gguf\n' \
-    "$expected_sha" "$expected_size" > "$TMP_DIR/manifest.txt"
 if MOCK_MV_FAIL_PARTIAL=1 run_downloader; then
     fail "a failed atomic replacement is reported"
 elif cmp -s "$third_model" "$model" \
@@ -334,8 +333,6 @@ fi
 printf 'fourth model revision\n' > "$TMP_DIR/source.gguf"
 expected_sha=$(sha256sum "$TMP_DIR/source.gguf" | cut -d' ' -f1)
 expected_size=$(wc -c < "$TMP_DIR/source.gguf")
-printf 'test/model.gguf|%s|%s|https://example.invalid/model.gguf\n' \
-    "$expected_sha" "$expected_size" > "$TMP_DIR/manifest.txt"
 if MOCK_MV_FAIL_RECEIPT=1 run_downloader \
     && cmp -s "$TMP_DIR/source.gguf" "$model" \
     && [ ! -e "$receipt" ] \
@@ -354,8 +351,8 @@ else
     fail "a model without a writable receipt is re-verified next run"
 fi
 
-printf '../escape.gguf|%s|%s|https://example.invalid/model.gguf\n' \
-    "$expected_sha" "$expected_size" > "$TMP_DIR/manifest.txt"
+printf '../escape.gguf|https://huggingface.co/example/model/resolve/main/model.gguf\n' \
+    > "$TMP_DIR/manifest.txt"
 if run_downloader; then
     fail "model paths cannot escape the configured root"
 else

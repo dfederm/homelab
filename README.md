@@ -365,13 +365,21 @@ reach it over the internal network. A missing NVIDIA runtime or container GPU se
 deployment rather than silently serving on the CPU.
 
 Model files live under `LLAMA_MODELS_ROOT`, normally a fast volume bind-mounted into the Docker LXC.
-The operator-owned `${CONFIG_DIR}/ai/models.txt` manifest pins each public artifact by immutable
-repository revision and SHA-256. Each non-comment line uses
-`relative-path|sha256|size-in-bytes|https-url`. `download-models.sh` stores the verified checksum in
-an adjacent `<model>.sha256` receipt, so later deployments skip hashing when the receipt matches the
-manifest. Existing models without a receipt are verified once and then cached. Treat installed model
-files as immutable; remove the receipt to force a full checksum verification. Downloads resume from a
-`.partial` file and are checked against both checksum and size before atomically replacing the model.
+The operator-owned `${CONFIG_DIR}/ai/models.txt` manifest lists Hugging Face models as
+`relative-path|https-url`, using URLs of the form
+`https://huggingface.co/<owner>/<repo>/resolve/<revision>/<file>`. Each AI deployment checks the
+selected branch for updates; use a branch such as `main` rather than a fixed commit. Downloads use
+the resolved commit, checksum, and size reported by the Hub. This verifies transfer integrity but
+does not independently approve upstream changes. A different filename or model still requires a
+manifest and configuration update.
+
+`download-models.sh` stores the verified checksum in an adjacent `<model>.sha256` receipt, so unchanged
+models do not need to be hashed or downloaded again. Treat installed model files as immutable; remove
+the receipt to force a full checksum verification. If Hugging Face metadata is unavailable, an
+already verified model can be used without an update check when its recorded source matches the
+manifest. Downloads resume from a `.partial` file and are checked before atomically replacing the
+model; a failed update leaves the old model in place and aborts deployment. A running model may need
+to be reloaded before it uses the replacement.
 
 LiteLLM is the durable routing boundary between clients and llama-swap. Its model aliases and backend
 mappings are deliberately **not** committed to this repository. They live in the ZFS-backed
