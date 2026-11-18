@@ -22,7 +22,7 @@
 services:
   radicale:
     container_name: radicale
-    image: tomsquest/docker-radicale:3.9.0.0@sha256:2f215d0e6a78ff68c280975af6ce580b05976f70c62b51640397e3eb5a7aa0e9
+    image: tomsquest/docker-radicale:3.9.2.0@sha256:cc586f75ec709d45d15dfbf20e53bab99e85ee5a4d7beafc7bbf852b2f07a2da
     restart: unless-stopped
     init: true
     read_only: true
