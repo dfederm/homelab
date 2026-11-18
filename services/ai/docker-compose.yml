@@ -25,7 +25,7 @@ services:
   # Workload aliases and per-client keys live in external ZFS-backed config.
   litellm:
     container_name: litellm
-    image: ghcr.io/berriai/litellm-database:v1.109.0@sha256:5b645ba56f839a402905fed102b35f1c2dcfb190fd2f0d8cbc0f850ed442a9a4
+    image: ghcr.io/berriai/litellm-database:1.110.0@sha256:f52042e5144a4bb452c8d5232aa894117e1500164e3c6d4dfa088d79eefaa632
     restart: unless-stopped
     command: ['--config=/app/config.yaml', '--port=4000']
     depends_on:
