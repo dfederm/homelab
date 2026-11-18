@@ -182,7 +182,7 @@ services:
   athena-mcp:
     container_name: athena-mcp
     # Renovate cannot access this registry; update tag and digest together.
-    image: ${CONTAINER_REGISTRY}/david/athena-mcp:0.1.48@sha256:b1893ce62322307a5dbd7b74ca0692839f2ccafffa17e64495bb4303b1cbe763
+    image: ${CONTAINER_REGISTRY}/david/athena-mcp:0.1.53@sha256:b4469e309b6cbd4c2d5c3a6fcd30209857f02c7d8b2533b8568d4445d238b6b6
     restart: unless-stopped
     environment:
       - TZ=${TZ}
